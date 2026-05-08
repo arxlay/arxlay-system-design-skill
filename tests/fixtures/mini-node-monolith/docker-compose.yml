@@ -1,0 +1,21 @@
+services:
+  app:
+    build: .
+    image: shopfront:latest
+    ports:
+      - "3000:3000"
+    environment:
+      DATABASE_URL: postgres://shopfront:shopfront@postgres:5432/shopfront
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+    depends_on:
+      - postgres
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: shopfront
+      POSTGRES_PASSWORD: shopfront
+      POSTGRES_DB: shopfront
+    volumes:
+      - shopfront-data:/var/lib/postgresql/data
+volumes:
+  shopfront-data:

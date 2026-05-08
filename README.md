@@ -96,6 +96,45 @@ read-skill (planned, separate repo).
 
 Time from trigger to commit on a typical small system: 15–25 minutes.
 
+## First-run quickstart mode
+
+For an empty model on a greenfield repository, the skill also exposes a
+**slash-style** trigger that runs a faster, no-questions path:
+
+```
+/arxlay describe-architecture
+```
+
+The assistant reads `docker-compose.yml`, top-level manifests, the README,
+and the `services/` / `apps/` directories, builds an inventory of 5–12
+elements drawn from the **arxlay-stdlib** vocabulary (Microservice, API,
+Database, External System, User), shows it as a bulleted list, and asks
+exactly one question: "save as your first diagram?". On approve it makes
+a single `commit_changes` call and replies with the canvas URL.
+
+Trade-offs are deliberately **not** captured in this mode — the goal is a
+first picture in under five minutes. The reply ends with an explicit
+invitation back into the natural-language design-mode for deeper work.
+
+```
+> You: /arxlay describe-architecture
+> Assistant: I read docker-compose.yml, services/auth/go.mod, README.md.
+> I see:
+>   - auth (Microservice) — Inferred from: services/auth/Dockerfile + go.mod
+>   - orders (Microservice) — Inferred from: services/orders/Dockerfile + go.mod
+>   - postgres (Database) — Inferred from: docker-compose.yml
+>   - Buyer (User) — Inferred from: README.md
+> Connections: orders→auth (uses), auth→postgres (storesIn), ...
+> Save as your first diagram?
+> You: yes
+> Assistant: Saved. https://arxlay.com/m/M-7k3p2/canvas (3 minutes from trigger)
+```
+
+The full first-run instructions live in `SKILL.md` Section 7. Per-source
+discovery rules live in `references/discovery.md` and the signal-to-type
+mapping in `references/mapping.md`. Manual smoke fixtures with expected
+outputs live under `tests/fixtures/`.
+
 ## Documentation
 
 Full installation guide and end-to-end examples:

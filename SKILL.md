@@ -1,7 +1,7 @@
 ---
 name: arxlay-system-design-skill
-description: Walks the user through describing their system architecture in Arxlay via conversation. Activates on the design trigger phrase ("Arxlay, design mode" / "Arxlay, let's describe the architecture" or Russian equivalent). Five-phase flow ending in an atomic commit through the Arxlay MCP server.
-version: 0.1.0
+description: Walks the user through describing their system architecture in Arxlay via conversation. Activates on the design trigger phrase ("Arxlay, design mode" / "Arxlay, let's describe the architecture" or Russian equivalent), or on the slash trigger "/arxlay describe-architecture" for first-run quickstart mode. Five-phase flow ending in an atomic commit through the Arxlay MCP server, plus a first-run quickstart for greenfield models.
+version: 0.2.0
 license: Apache-2.0
 ---
 
@@ -20,6 +20,10 @@ Activate this skill **only** when the user opens with one of these triggers (or 
 - "Arxlay, design mode"
 - "Arxlay, давай опишем архитектуру"
 - "Arxlay, давай опишем систему"
+- "/arxlay describe-architecture" (slash-style; activates **first-run mode**)
+- "/arxlay let's describe architecture" (slash-style; activates **first-run mode**)
+
+**Two modes:** the natural-language triggers above run the **full 5-phase flow** (Section 2), aimed at mature description with trade-offs. The slash-style triggers run **first-run quickstart mode** (Section 7), aimed at producing a first C4 Container diagram from an empty model in under five minutes. Pick by trigger style; do not negotiate it with the user.
 
 **Do NOT activate** on read-style questions like:
 
@@ -289,3 +293,152 @@ Things you must avoid:
 8. **Reading secrets / `.env`.** Never. Even if listed by `glob`, skip.
 9. **Splitting one concept across two sessions.** If the user runs out of time, save what's there with `commit_changes`, end the session, and tell them they can resume.
 10. **Translating user terms.** If they say "Auth", don't rename to "AuthenticationService" for "consistency". Their words go in `name`.
+
+## Section 7 — First-run quickstart mode
+
+This is a separate, fast path. Activate **only** on the slash-style triggers from Section 1:
+
+- `/arxlay describe-architecture`
+- `/arxlay let's describe architecture`
+
+Goal: from trigger to an open canvas URL in **under five minutes**. The output is a C4-style Container diagram (5–12 elements, 5–15 relationships) drawn through the **arxlay-stdlib** types — Microservice, API, Database, External System, User. No trade-offs, no team assignments, no domain groupings — those come later via the full design-mode flow.
+
+This mode runs differently from Section 2:
+
+- **One** confirmation question. Not a dialog.
+- Discovery is read-only file inspection — never any user questions until the confirmation.
+- `description` is two short sentences (what it does + Inferred from), not the `## Why` / `## Trade-offs` / `## Alternatives` block from Section 5.
+- The last reply ends with an explicit invitation back into design-mode for deeper work.
+
+### 7.1 — When first-run mode applies
+
+Activate first-run when **both** are true:
+
+1. The user message starts with one of the slash triggers above.
+2. The active model is empty: `query_elements` returns `total ≤ 4`.
+
+If the model has 5 or more elements, **do not run first-run**. Tell the user: "I see N elements already in this model — first-run is for empty models. Switching to design-mode (Section 2) to extend the existing architecture instead." Then proceed with Section 2 Phase 1.
+
+### 7.2 — Pre-flight (5 seconds, silent)
+
+Before generating any output for the user:
+
+1. Call `list_models` — verify MCP is reachable; record the active model's `model_id` and `expected_model_version`.
+2. Call `query_elements` (no filter, default limit) — check `total`. Greenfield path requires `total ≤ 4`.
+3. Confirm Read/Glob/Grep tools exist in your environment. If they do not (e.g. Claude Desktop with no file access), say so and switch to Section 2 Phase 2 interview path — first-run without code access is not a thing.
+
+If any pre-flight step fails, surface it once and stop — don't keep trying.
+
+### 7.3 — Discovery (1–2 minutes, no questions)
+
+Run sources in this strict order. Stop early when the **first** source produces ≥ 5 candidate elements:
+
+1. `docker-compose.yml` / `compose.yaml` (root or top-level subfolder).
+2. `package.json`, `go.mod`, `requirements.txt`, `pyproject.toml`, `Cargo.toml`.
+3. `README.md` (top-level only).
+4. `services/`, `apps/`, `packages/` directories — monorepo layout.
+5. `.env.example` (never `.env`).
+6. `Dockerfile` at root.
+
+For full per-source markers and extraction rules, see `references/discovery.md`.
+
+Build a working inventory with two lists:
+
+- **Elements:** `name`, `type` (one of microservice / api / database / external-system / user), `inferred_from` (the file or files that produced this candidate).
+- **Relationships:** `from`, `to`, `kind` (one of uses / storesIn / calls).
+
+If discovery yielded fewer than 3 candidate elements, fall back to Section 2 Phase 2 interview path with five quick questions ("What are you building? Main components? Where does data live? External dependencies? Who's the user?") — first-run without enough signal is worse than a brief interview.
+
+### 7.4 — Mapping signals to Stdlib types
+
+Use this short table; broader rules live in `references/mapping.md`.
+
+| Signal in repo                                         | Stdlib type             |
+| ------------------------------------------------------ | ----------------------- |
+| `services.X` in compose, application image             | `arxlay:microservice`   |
+| `image: postgres\|mysql\|mongo\|redis\|cassandra\|...` | `arxlay:database`       |
+| Direct dep on `stripe`/`@aws-sdk`/`openai`/`sendgrid`/`twilio` + import in code | `arxlay:external-system` |
+| Frontend stack (`react`/`vue`/`svelte`/`next`)         | `arxlay:microservice` (tag: frontend) |
+| Explicit gateway service (`api/`, `services/api`, `gateway`)   | `arxlay:api`    |
+| README mentions end users / admins / customers         | `arxlay:user` (one or two, never more) |
+
+Relationships:
+
+- `depends_on` in compose, or `*_URL` env in another service → `arxlay:uses`.
+- A service writing to a database → `arxlay:storesIn`.
+- A clear event-driven flow (queue consumer) → `arxlay:calls` (rare in V1; skip if uncertain).
+
+**Guardrail against false external systems:** add an `arxlay:external-system` only when the dependency is **direct** (top-level in the manifest) **and** there is at least one import or call site in the code (`grep`-able). Transitive deps in `node_modules` / `vendor/` do not count.
+
+### 7.5 — One confirmation, in prose
+
+Show the inventory as a short bulleted list — never as JSON, never as a table the user has to parse. Cap at 12 elements; if discovery found more, keep the most-grounded 12 (most files referenced) and mention the rest in one line. Then ask exactly one question.
+
+Sample:
+
+> I read `docker-compose.yml`, `services/auth/go.mod`, and `README.md`. I see:
+>
+> - **auth** (Microservice) — Go service, exposed on port 8080. Inferred from: `services/auth/Dockerfile + go.mod`.
+> - **orders** (Microservice) — Go service. Inferred from: `services/orders/Dockerfile + go.mod`.
+> - **postgres** (Database) — shared by auth and orders. Inferred from: `docker-compose.yml: services.postgres`.
+> - **Stripe** (External System) — payment processing. Inferred from: `services/orders/go.mod: github.com/stripe/stripe-go`.
+> - **Customer** (User) — end user of the platform. Inferred from: `README.md: "Customers can…"`.
+>
+> Connections: orders→auth (uses), auth→postgres (storesIn), orders→postgres (storesIn), orders→Stripe (uses), Customer→orders (uses).
+>
+> Save as your first diagram? (yes / no / tell me what to change in plain English)
+
+Accept the answer:
+
+- **yes / save it / go / ship it / сохраняй** → Section 7.6.
+- **no** → reply with one sentence ("Got it — switch into design-mode and we'll build it from scratch with trade-offs?") and stop. The user can re-trigger with the natural-language phrase.
+- **edit-text** ("drop Stripe, rename auth to identity") → apply the edit silently to the inventory, **re-show the updated list**, ask the same one question. Don't enter Section 2 — first-run stays one-shot.
+
+### 7.6 — Commit
+
+Single `commit_changes` call:
+
+- `model_id` and `expected_model_version` from pre-flight.
+- Fresh UUIDv4 `idempotency_key` and `mcp_session_id`.
+- One `elements.create[]` entry per inventory item:
+  - `type_id` from the mapping table.
+  - `fields.identity.name` = the user-facing name (do not translate, do not "improve").
+  - `fields.identity.description` = exactly two sentences:
+    1. What this element does (one sentence — verb + object).
+    2. `Inferred from: <source files separated by ", ">` (one sentence).
+
+  Example: `"Backend service handling user authentication and JWT issuance.\n\nInferred from: services/auth/Dockerfile + go.mod"`. No `## Why` / `## Trade-offs` / `## Alternatives` blocks here — those belong to Section 5 / design-mode only.
+- One `relationships.create[]` entry per inventory edge using the right `arxlay:uses` / `arxlay:storesIn` / `arxlay:calls`.
+
+Handle errors per Section 2 Phase 5: `version_conflict` stops, `validation_failed` walks back to Section 7.5 with a re-shown inventory, `permission_denied` ends the session with a clear message.
+
+### 7.7 — Show & next steps
+
+After a successful commit, reply with **one** message containing:
+
+1. The headline numbers: "Saved N elements and M relationships. Model version: X."
+2. The canvas URL (`https://arxlay.com/m/<model_id>/canvas` or whatever `commit_changes` returned).
+3. An explicit bridge into design-mode:
+
+   > Want to add trade-offs, owners, or break a service into modules? Say *"Arxlay, опиши X подробнее"* (or the English equivalent) and we'll go deeper.
+
+This bridge is mandatory — first-run without it leaves the user wondering "and now what?".
+
+### 7.8 — Anti-patterns specific to first-run
+
+In addition to the Section 6 anti-patterns:
+
+1. **More than one question.** First-run asks exactly once, in Section 7.5. Anything beyond is design-mode in disguise.
+2. **Inventing services.** If a service isn't in compose / a manifest / a top-level dir, do not invent one to "round out" the diagram. Five confirmed elements beat ten where half are guesses.
+3. **JSON or YAML in user-facing replies.** The inventory is a bulleted list. The commit payload stays internal.
+4. **Adding Teams, ADRs, Domains, Groupings.** These are non-goals here (epic 013 D-list). They live in design-mode.
+5. **Component-level drilldown.** Don't list internal modules of a single service. Container-level is the contract — one node per deployable.
+6. **Reading IaC manifests** (Kubernetes, Terraform, Pulumi). Not in scope for V1; ignore even if present.
+7. **Echoing secrets.** If `.env.example` contains placeholder secret keys, list them generically ("uses Stripe — inferred from STRIPE_SECRET_KEY in .env.example"). Never the value, even when it's clearly a placeholder.
+
+### 7.9 — Failure modes
+
+- **Pre-flight fails (no MCP).** Tell the user once: "Arxlay MCP isn't reachable — set it up via [arxlay.com/docs/integrations/quickstart-claude-desktop](https://arxlay.com/docs/integrations/quickstart-claude-desktop) and try again." Stop.
+- **Pre-flight fails (model not empty).** Switch to design-mode (Section 2) silently — don't make the user re-trigger.
+- **Discovery yielded < 3 elements.** Switch to Section 2 Phase 2 interview path with the five quick questions.
+- **`commit_changes` returns `validation_failed`.** Re-show the inventory in Section 7.5 with the offending element marked, explain what the metamodel rejected (e.g. "External System → Database via `storesIn` is not allowed — switching to `uses`"), ask the same one question.
