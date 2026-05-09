@@ -1,7 +1,7 @@
 ---
 name: arxlay-system-design-skill
 description: Walks the user through describing their system architecture in Arxlay via conversation. Activates on the design trigger phrase ("Arxlay, design mode" / "Arxlay, let's describe the architecture" or Russian equivalent), or on the slash trigger "/arxlay describe-architecture" for first-run quickstart mode. Five-phase flow ending in an atomic commit through the Arxlay MCP server, plus a first-run quickstart for greenfield models.
-version: 0.2.0
+version: 0.3.0
 license: Apache-2.0
 ---
 
@@ -48,9 +48,10 @@ The skill is a 5-phase pattern. Each phase has a goal, a "do" list, a "do NOT" l
 1. Verify MCP Arxlay is reachable. Call `list_models` — record the result.
 2. Identify the active model. If multiple, ask the user which one. Record `model_id` and `version` (returned by `list_models`).
 3. Check whether the model has elements: call `query_elements` with no name filter, default limit. If `total > 0`, you are in **brownfield**; otherwise **greenfield**.
-4. Check for code access: do native file-reading tools (Read, Glob, Grep, or equivalent) exist in your environment? If yes and the user is in a project, you can offer the **code path**; if not, default to **interview path**.
-5. Decide the notation. Ask the user: Stdlib (microservices, modern apps), ArchiMate (enterprise context), or user-custom layer. The model's enabled types narrow this — only suggest types that exist in the resolved metamodel.
-6. **Spit one consolidated reply** summarising what you discovered and the choice the user needs to make.
+4. **Brownfield only:** call `list_artifacts(model_id)` and record the existing diagrams (name, notation, artifact_type, element/relationship counts, created_via). You'll need this in Phase 5 to (a) pick an artifact name that doesn't collide and (b) tell the user up-front that you'll create a *new* diagram for this session rather than touching their existing layouts. Greenfield can skip this.
+5. Check for code access: do native file-reading tools (Read, Glob, Grep, or equivalent) exist in your environment? If yes and the user is in a project, you can offer the **code path**; if not, default to **interview path**.
+6. Decide the notation. Ask the user: Stdlib (microservices, modern apps), ArchiMate (enterprise context), or user-custom layer. The model's enabled types narrow this — only suggest types that exist in the resolved metamodel.
+7. **Spit one consolidated reply** summarising what you discovered and the choice the user needs to make.
 
 **Do NOT:**
 
@@ -60,11 +61,17 @@ The skill is a 5-phase pattern. Each phase has a goal, a "do" list, a "do NOT" l
 
 **Sample dialog:**
 
-> **Skill:** I see model "E-commerce platform" (version 7) with 0 elements — this is a greenfield model. I have access to the code in the current repository (Read/Glob/Grep tools available).
+> **Skill:** I see model "E-commerce platform" (version 7) with 0 elements and 0 diagrams — greenfield. I have access to the code in the current repository (Read/Glob/Grep tools available).
 >
 > Which vocabulary do you want to use — Stdlib (for microservice architectures) or ArchiMate (for enterprise context)? And — would you like to start with a code review or with a description in your own words?
 >
 > **User:** Stdlib. Take the code review path.
+
+**Brownfield sample (with existing diagrams):**
+
+> **Skill:** Model "Payment platform" (version 14) — 23 elements, 2 diagrams ("Domain data model — 2026-04-22", "Tenancy hierarchy"). I'll create a *new* diagram for this session so your existing layouts stay untouched. Code access: yes.
+>
+> Which area to extend, and Stdlib or ArchiMate?
 
 ### Phase 2 — Discovery
 
@@ -165,7 +172,7 @@ This converts trade-offs into first-class artefacts of the session, not post-hoc
 
 ### Phase 5 — Approve & commit
 
-**Goal:** atomically save the draft via `commit_changes`.
+**Goal:** atomically save the draft via `commit_changes` AND make it visible on a canvas the user can open.
 
 **Do:**
 
@@ -173,23 +180,36 @@ This converts trade-offs into first-class artefacts of the session, not post-hoc
 2. Generate a fresh **UUIDv4** for `idempotency_key`. Store it — if the call needs retry, reuse the same key.
 3. Generate a fresh UUIDv4 for `mcp_session_id` (per session, not per call — reuse across multi-step sessions if you do them).
 4. Generate a UUIDv4 for each new element's `public_id`. The same UUID serves as the `source` or `target` reference in relationships within the same batch — there is no separate temp_id.
-5. Call `commit_changes` with:
+5. Generate **one** UUIDv4 for the artifact you'll create (next bullet). One artifact per design-mode session is the V1 contract.
+6. Call `commit_changes` with:
    - `model_id` from Phase 1.
    - `expected_model_version` from Phase 1 (the version when you read the model).
    - `idempotency_key` and `client_metadata.{mcp_client_name, mcp_session_id}`.
    - `elements.create[]` with `public_id`, `type_id`, `name` (or full `fields.identity.name`), and any other fields.
    - `relationships.create[]` with `public_id`, `type_id`, `source`, `target`.
+   - **`artifacts.create[]` (REQUIRED — exactly one entry):** without this the user lands on an empty canvas with the catalog populated but nothing to look at — the worst end-state. The entry is:
+     - `public_id` from step 5.
+     - `name` — short summary of *this* commit's slice (e.g. "Domain data model — 2026-05-09", "Auth surface", "Tenancy hierarchy"). In brownfield, make sure the name doesn't collide with the diagrams you saw in Phase 1; suffix " (2)" if it would.
+     - `notation` — `"archimate"` for ArchiMate models, `"archimate"` or `"c4"` for stdlib models (stdlib types personality-map onto ArchiMate). Match the user's chosen vocabulary from Phase 1.
+     - `artifact_type` — `"graph"` is the default and what you should use unless the user explicitly asked for a sequence diagram, BPMN flow, or whiteboard. The validator gates `bpmn`/`sequence`/`whiteboard` artifact types to matching notations.
+     - `place_all_in_batch: true` — lets the server place every element + relationship from this commit on the new artifact without you spelling out the lists. This is the V1 default; only fall back to explicit `place_elements` / `place_relationships` if the user explicitly asks for a partial diagram.
    - The trade-off markdown goes in `fields.identity.description` of each element (see Section 5).
-6. On success: report the new `model_version`, the count of created elements/relationships, and a link to the canvas.
-7. On `version_conflict`: someone else committed since Phase 1. Re-read with `get_schema` or `list_models`, present the new state, offer to merge — do NOT auto-merge.
-8. On `validation_failed`: walk back to Phase 4 with the specific `details[]` paths and explain the issue in user-friendly prose ("The type `microservice` is not enabled in this model — switch to `system`?").
-9. On `permission_denied`: stop. The user lacks write access; tell them and end the session.
+7. On success:
+   - Read `artifacts_created[0].canvas_url` from the response — that's the direct link to the new diagram.
+   - Reply with: counts (elements/relationships/artifacts), new `model_version`, and the **canvas URL as a clickable link**. Example: "Saved 8 elements + 9 relationships + 1 artifact 'Domain data model — 2026-05-09'. Model version: 14. Open it: <canvas_url>".
+   - Tell the user the layout is auto-computed on first canvas view (ELK pass) — they may want to nudge nodes around.
+8. On `version_conflict`: someone else committed since Phase 1. Re-read with `get_schema` or `list_models`, present the new state, offer to merge — do NOT auto-merge.
+9. On `validation_failed`: walk back to Phase 4 with the specific `details[]` paths and explain the issue in user-friendly prose ("The type `microservice` is not enabled in this model — switch to `system`?"). Artifact-specific codes you may see: `artifact_notation_invalid`, `artifact_type_invalid`, `artifact_notation_type_mismatch`, `artifact_placement_conflict`, `artifact_placement_missing_endpoint`, `artifact_name_required`. All are friendly Phase A errors — surface them, propose the fix, retry with a fresh idempotency key.
+10. On `permission_denied`: stop. The user lacks write access; tell them and end the session.
 
 **Do NOT:**
 
 - Loop on `version_conflict` automatically. Conflicts mean the user must decide.
 - Cache the response client-side; the server's idempotency cache handles retry.
 - Commit twice "to be safe". Idempotency lets you retry, but each fresh action should generate a new key.
+- **Skip `artifacts.create[]`.** Without it, the commit succeeds but the user lands on an empty canvas — the failure mode this whole epic was opened to fix. One artifact, every commit.
+- **Mix `place_all_in_batch: true` with explicit `place_elements` / `place_relationships`.** The validator rejects this combination as `artifact_placement_conflict`. Pick one form per artifact.
+- **Touch existing artifacts.** V1 has no `place_elements_on_artifact` MCP tool — you can only create new diagrams. If the user wants their commit on an existing diagram, tell them they'll have to drag the new elements onto it via the UI; this MCP surface doesn't reach there yet (see Phase 2 of epic 015).
 
 ## Section 3 — Code awareness
 
@@ -293,6 +313,8 @@ Things you must avoid:
 8. **Reading secrets / `.env`.** Never. Even if listed by `glob`, skip.
 9. **Splitting one concept across two sessions.** If the user runs out of time, save what's there with `commit_changes`, end the session, and tell them they can resume.
 10. **Translating user terms.** If they say "Auth", don't rename to "AuthenticationService" for "consistency". Their words go in `name`.
+11. **Committing without an artifact.** Every `commit_changes` from this skill MUST include exactly one `artifacts.create[]` entry with `place_all_in_batch: true`. Without it, the commit succeeds but the user lands on an empty canvas — the design-mode flow's worst end-state, and the reason epic 015 exists.
+12. **Touching existing artifacts.** The MCP surface only creates new diagrams; there's no in-place add-elements-to-existing-artifact tool yet. In brownfield, your new artifact is a *new* diagram, not an extension of an existing one. Don't promise the user otherwise.
 
 ## Section 7 — First-run quickstart mode
 
@@ -409,20 +431,37 @@ Single `commit_changes` call:
 
   Example: `"Backend service handling user authentication and JWT issuance.\n\nInferred from: services/auth/Dockerfile + go.mod"`. No `## Why` / `## Trade-offs` / `## Alternatives` blocks here — those belong to Section 5 / design-mode only.
 - One `relationships.create[]` entry per inventory edge using the right `arxlay:uses` / `arxlay:storesIn` / `arxlay:calls`.
+- **`artifacts.create[]` (REQUIRED — exactly one entry)** so the user lands on a populated canvas, not an empty one:
+  - Fresh UUIDv4 `public_id`.
+  - `name` = `"First-run snapshot — <repo-name> — <YYYY-MM-DD>"` where `<repo-name>` is the basename of the working directory the discovery ran in (e.g. `"First-run snapshot — arxlay — 2026-05-09"`).
+  - `notation: "archimate"` (stdlib types personality-map onto ArchiMate; the artifact draws cleanly under the archimate notation).
+  - `artifact_type: "graph"`.
+  - `place_all_in_batch: true` — every discovered element + relationship lands on this artifact in one shot.
 
-Handle errors per Section 2 Phase 5: `version_conflict` stops, `validation_failed` walks back to Section 7.5 with a re-shown inventory, `permission_denied` ends the session with a clear message.
+Handle errors per Section 2 Phase 5: `version_conflict` stops, `validation_failed` walks back to Section 7.5 with a re-shown inventory, `permission_denied` ends the session with a clear message. New artifact-specific validation codes (`artifact_*`) are surfaced in Phase 5 too — same handling.
 
 ### 7.7 — Show & next steps
 
 After a successful commit, reply with **one** message containing:
 
-1. The headline numbers: "Saved N elements and M relationships. Model version: X."
-2. The canvas URL (`https://arxlay.com/m/<model_id>/canvas` or whatever `commit_changes` returned).
-3. An explicit bridge into design-mode:
+1. The headline numbers: "Saved N elements, M relationships, and 1 diagram. Model version: X."
+2. The **canvas URL** — read it from `artifacts_created[0].canvas_url` in the `commit_changes` response. **Always use this exact URL** (the server computes it from the model + artifact public_ids); never hand-construct one. Show it as a clickable Markdown link.
+3. A one-liner about layout: "Layout auto-computes on first canvas open — feel free to drag nodes around."
+4. An explicit bridge into design-mode:
 
    > Want to add trade-offs, owners, or break a service into modules? Say *"Arxlay, опиши X подробнее"* (or the English equivalent) and we'll go deeper.
 
 This bridge is mandatory — first-run without it leaves the user wondering "and now what?".
+
+Sample reply:
+
+> Saved 7 elements, 6 relationships, and 1 diagram (`First-run snapshot — arxlay — 2026-05-09`). Model version: 1.
+>
+> Open it: <https://dev.arxlay.com/m/KSTBYFKfMBzA/schemas/2fbc153c-0eac-4e9b-9420-4f59c68fe842>
+>
+> Layout auto-computes on first canvas open — drag nodes around if anything overlaps.
+>
+> Want to add trade-offs, owners, or break a service into modules? Say *"Arxlay, давай опишем подробнее"* and we'll go deeper.
 
 ### 7.8 — Anti-patterns specific to first-run
 
@@ -435,6 +474,8 @@ In addition to the Section 6 anti-patterns:
 5. **Component-level drilldown.** Don't list internal modules of a single service. Container-level is the contract — one node per deployable.
 6. **Reading IaC manifests** (Kubernetes, Terraform, Pulumi). Not in scope for V1; ignore even if present.
 7. **Echoing secrets.** If `.env.example` contains placeholder secret keys, list them generically ("uses Stripe — inferred from STRIPE_SECRET_KEY in .env.example"). Never the value, even when it's clearly a placeholder.
+8. **Hand-constructing the canvas URL.** Use `artifacts_created[0].canvas_url` from the response verbatim. Never assemble `https://arxlay.com/m/<id>/canvas` or any other guess; the server's URL is the contract.
+9. **Skipping `artifacts.create[]` in 7.6.** First-run with no artifact = empty canvas, exactly the failure mode this V1 was built to prevent. Every first-run commit creates exactly one artifact with `place_all_in_batch: true`.
 
 ### 7.9 — Failure modes
 
