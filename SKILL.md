@@ -1,7 +1,7 @@
 ---
 name: arxlay-system-design-skill
 description: Walks the user through describing their system architecture in Arxlay via conversation. Activates on the design trigger phrase ("Arxlay, design mode" / "Arxlay, let's describe the architecture" or Russian equivalent), or on the slash trigger "/arxlay describe-architecture" for first-run quickstart mode. Five-phase flow ending in an atomic commit through the Arxlay MCP server, plus a first-run quickstart for greenfield models.
-version: 0.4.0
+version: 0.5.0
 license: Apache-2.0
 ---
 
@@ -19,6 +19,31 @@ proposal summaries, error reports, every reply. If they're in English, stay in
 English. If the user mixes languages, follow the language of the *most recent*
 user turn. Don't translate technical type names, MCP tool names, or entity
 identifiers — those stay verbatim in either language.
+
+## Tone
+
+**Don't leak the metamodel.** The user invoked a "design my architecture"
+skill, not a "tour my type system" one. Words that belong in your head, not in
+their replies:
+
+- `stdlib`, `ArchiMate`, `archimate-3.2`, "layered metamodel"
+- `personality`, `baseTypeId`, "allowance rule"
+- `enabled_layers`, `notation`, `resolved metamodel`
+- Specific type ids in their raw form (`arxlay:system`, `archimate:application-component`)
+
+Substitute plain language when you need to refer to these concepts:
+
+| Internal                              | What the user reads                                 |
+| ------------------------------------- | --------------------------------------------------- |
+| stdlib / ArchiMate layer choice       | "vocabulary" — and only mention if they ask         |
+| `arxlay:system`, `arxlay:module`      | "system", "module" (lowercase nouns)                |
+| allowance rule blocked a relationship | "I can't connect a *system* to a *user* directly — here's the closest match…" |
+| metamodel validator                   | don't surface; just translate the error             |
+| `commit_changes` / `query_elements`   | tool names are OK in your reasoning, not in replies |
+
+The user-facing reply names types in human words. If they want to know "what's
+the underlying id", they'll ask. Same for trade-offs: write the consequence,
+not the system that gates it.
 
 ## Section 1 — When to activate
 
@@ -128,68 +153,143 @@ This converts trade-offs into first-class artefacts of the session, not post-hoc
 - Ask the same question twice — keep state across rounds.
 - Skip ownership questions in any team context.
 
-### Phase 3 — Proposal
+### Phase 3 — Proposal (chunked, iterative)
 
-**Goal:** present the draft model in **prose**, with reasoning, trade-offs, and alternatives — never as raw JSON.
+**Goal:** build the draft together one slice at a time, never as one wall of
+text. Each slice is a tiny self-contained proposal the user can OK in one
+breath, optionally tweak, and watch grow. Trade-offs surface inline when a
+non-trivial decision is on the table, not as a separate ritual.
 
-**Do:**
+**The flow is a loop**: propose → react → confirm → next. Five slices in
+strict order, each its own conversational turn:
 
-- For each proposed element: name, type (Stdlib or ArchiMate), one-line purpose, **Why / Trade-offs / Alternatives** (see Section 5).
-- For each proposed relationship: source → target, type, why this relationship rather than another.
-- Group related elements visually in the prose so the user can scan: "Core: Auth Service, Users DB. Platform: Payment Service, Orders DB. External: Stripe."
-- End with: "Save or revise? If something looks wrong — be specific."
+1. **Anchor** — 1–3 most central systems (the SUTs). Usually the application
+   itself + maybe the user-facing surface. Nothing else.
+2. **Modules inside the anchor** — the internal decomposition of the
+   primary system (if any). If the anchor is monolithic, this slice is empty
+   and you skip to data.
+3. **Data stores** — databases, caches, queues. Plus the "X stores in Y"
+   edges that go with them.
+4. **External dependencies** — vendors, third-party APIs, SaaS the user
+   mentioned or you found in code. Plus the "service uses X" edges.
+5. **Cross-cutting relationships** — anything that didn't come naturally
+   with the slice above (e.g. inter-module calls, service-to-service uses).
+
+Each slice fits in ≈6 lines. The user can scan it without scrolling.
+
+**Per-slice contract:**
+
+- 1–3 sentences naming the elements and their plain-language type.
+- One sentence per element saying *what it is*, not *why* — keep "why"
+  questions only for non-obvious calls.
+- If a decision is non-trivial (which database engine, which language,
+  monolith vs split), append exactly **one** trade-off question inline. Don't
+  pre-write `## Why / ## Trade-offs / ## Alternatives` blocks — Section 5
+  format is for the final committed `description`, not the live dialogue.
+- End the slice with **one explicit confirmation question**: "ОК идём
+  дальше?" / "OK, next?" — or a specific yes/no. The user's "ок / yes /
+  угу" advances; anything else is an edit.
 
 **Do NOT:**
 
-- Show JSON or YAML to the user. They came here to avoid that.
-- Commit at this stage. Phase 3 is draft-only — no MCP write call.
-- Propose types not in the model's resolved metamodel. If you're unsure, ask the user or call `list_models`/`query_elements` again.
-- Hide trade-offs in passive voice ("we considered MongoDB"). State which option, why rejected.
+- Dump all five slices at once. The user asked for iterative, not "five
+  paragraphs joined by ---". One slice, one reply.
+- Show JSON or YAML.
+- Surface metamodel jargon when describing element types (see Tone).
+- Pre-validate by guessing allowance. Use the resolved-metamodel data you
+  collected in Phase 1 (or, when it lands, the dedicated allowance query
+  tool). When you can't connect A to B with the relationship you wanted,
+  rephrase: propose a different relationship or a different intermediate
+  element — don't make the user solve the type system.
+- Commit anything until Phase 5. Phase 3 is conversation; the cumulative
+  draft state lives in your context, not in the model.
 
-**Sample dialog:**
+**Track state explicitly.** After each accepted slice, keep a running
+inventory in your head: `accepted_elements[]`, `accepted_relationships[]`,
+`pending_trade_offs[]` (for inline questions you asked but the user
+deferred). When Phase 3 is complete, that inventory IS the Phase 5 commit
+payload.
 
-> **Skill:** Based on our conversation, I propose:
+**Sample dialog (slice 1 — Anchor):**
+
+> **Skill:** Стартую с двух центральных систем:
 >
-> **Auth Service** (Stdlib: `arxlay:system`)
-> - **Why:** centralised authentication reduces duplication across services.
-> - **Trade-offs:** tight coupling — every service depends on Auth; if Auth degrades, they all degrade.
-> - **Alternatives:** per-service auth (rejected — scaling concerns as the team grows); JWT-only without a service (rejected — no centralised session management).
+> - **Auth Service** — наш сервис аутентификации. Тип: *system*.
+> - **Web App** — фронт, где пользователь логинится. Тип: *system*.
 >
-> **Users DB** (Stdlib: `arxlay:entity`)
-> - **Why:** persistence for users and sessions.
-> - **Trade-offs:** Postgres vs MongoDB — Postgres wins for joins across users/orgs/roles; MongoDB would be faster on pure reads but harder for reporting.
+> Auth Service — общий или у каждого продукта свой? *(коротко влияет на
+> trade-off "связность vs изоляция")*
 >
-> **Relationships:**
-> - Auth Service → Users DB (Stdlib: `arxlay:uses`)
+> ОК идём дальше или что-то поправить?
 >
-> Save or revise?
+> **User:** ок
+>
+> **Skill (slice 2 — Modules inside the anchor):** Внутри Auth Service вижу
+> три части — session-handler, jwt-issuer, oauth-bridge. Это модули внутри
+> одного бинарника?
+>
+> ...
+
+**Iterative trade-off probing.** When the user states a choice during the
+slice ("Postgres", "gRPC"), ask the trade-off question in the *next* reply,
+not the same one. Stack at most one open question at a time.
 
 ### Phase 4 — Refinement
 
-**Goal:** iterate on the draft until the user is satisfied.
+**Goal:** absorb edits between slices and re-summarise before Phase 5.
+
+In the chunked flow Phase 4 happens **inside** Phase 3 — every "edit"
+response from the user lives between two slices, and is applied to the
+running draft state before the next slice fires. There is no separate
+"refinement mode"; the loop *is* the refinement mode.
+
+After the last slice is accepted, do **one** consolidated recap before
+commit: a flat list of elements and relationships in the order they were
+agreed, no `## Why` blocks, no jargon. Ask one final question — "go ahead
+and save?" — and wait for the explicit approval (Phase 5).
 
 **Do:**
 
-- Treat each user comment as a discrete edit: add, remove, modify a single piece.
-- For trade-off requests ("expand on this") — produce a fuller paragraph, not a bullet-point shuffle.
-- Re-state the affected piece after each edit so the user confirms the change landed.
-- Track the **draft state in conversation** — do NOT call MCP write tools mid-refinement.
+- Treat each user comment as a discrete edit. Apply it to the running
+  draft (in your head), then re-state only the affected element/relationship
+  so the user confirms the change landed.
+- For long-form trade-off requests ("explain why we picked Postgres") —
+  write the fuller paragraph and offer to put it into the element's
+  `description` at commit time.
+- Re-summarise the cumulative draft only when the user looks lost, or
+  before the Phase 5 commit. Don't recap after every slice.
 
 **Do NOT:**
 
-- Commit at the first user "ok". Wait for explicit approval phrases like "save it", "commit", "go", "ship it", or their Russian equivalents ("сохраняй", "залей это"). A bare "ok" is acknowledgement of your previous message, not a green light.
-- Lose state across a long refinement loop. Re-summarise the current draft if the user gets lost ("here's what's in the draft right now: ...").
-- Refuse legitimate edits. If the user wants to break a "best practice", document the trade-off and respect the choice.
+- Commit on the first user "ok". A bare "ok" advances to the *next slice*
+  (Phase 3 loop continues). A bare "ok" at the very end advances to the
+  final recap, not to commit. Wait for explicit "save it / commit / go /
+  ship it / сохраняй / коммить" before Phase 5.
+- Lose state. The cumulative `accepted_elements[]` /
+  `accepted_relationships[]` lives in your context the whole way through.
+- Refuse legitimate edits. If the user wants to break a "best practice",
+  document the trade-off and respect the choice.
 
-**Sample dialog:**
+**Sample dialog (mid-slice edit):**
 
-> **User:** The trade-off for Payment Service is weak — write what we actually considered.
+> **User:** Auth Service общий для всего, не дробим.
 >
-> **Skill:** Updated Payment Service:
-> > **Trade-offs:** we picked Stripe (managed, fast onboarding, 2.9% fee) over an in-house gateway (more control but 6+ months of dev) and Adyen (lower fee at scale, but heavier integration overhead). Stripe is pragmatic for our current volume; we'll revisit when GMV grows.
-> > **Alternatives:** in-house (rejected — time-to-market), Adyen (rejected — over-engineered for current volume).
+> **Skill:** Принято — Auth Service общий. (Apply to draft. Carry to next
+> slice: this fixes the module decomposition slice, since Auth Service
+> stays one box.) Идём к данным?
+
+**Sample dialog (pre-commit recap):**
+
+> **Skill:** Перед сохранением — итого в драфте:
 >
-> Anything else to revise, or shall we commit?
+> Системы: Web App, Auth Service.
+> Модули в Auth Service: session-handler, jwt-issuer, oauth-bridge.
+> Данные: Users DB (Postgres), Sessions Cache (Redis).
+> Внешние: Google OAuth.
+> Связи: Web App → Auth Service (uses), Auth Service → Users DB (stores in),
+> Auth Service → Sessions Cache (stores in), Auth Service → Google OAuth (uses).
+>
+> Сохраняем?
 
 ### Phase 5 — Approve & commit
 
@@ -257,6 +357,47 @@ If the tools exist, **prefer the code path** for greenfield or brownfield with c
 - Generated code (e.g. `*.pb.go`, `*.gen.ts`).
 
 **When code reveals secrets:** if you accidentally read a file with credentials, do not echo them back. Tell the user "this file contains secrets — skipping", continue. Don't store them in the model `description`.
+
+**Optional: offload discovery to an Explore subagent.** When the repo is
+big (≥ a couple hundred relevant files) or unfamiliar — or when you want
+file reads to stay out of the main context — spawn one `Explore` subagent
+during Phase 2's code path while you do MCP warm-up (Phase 1 `list_models`,
+`query_elements`, `list_artifacts`) in parallel. The subagent reads
+`README.md`, manifests, compose files, top-level service folders, and
+returns a compact inventory of candidate components, data stores, and
+external dependencies — without leaving its file dumps in your context.
+
+When to use it:
+
+- Repo has > ~50 likely structural files (broad services tree, monorepo
+  layout, many manifests).
+- You haven't worked in this codebase recently; you'd be re-discovering it
+  from scratch.
+- The user's first message implies "scan everything", not "I'll point you".
+
+When to skip it:
+
+- You already know the repo (recent session, clear instructions).
+- Small repo where one Glob + a couple of Reads cover everything.
+- Interview path — no code is being read.
+
+The subagent's job is purely **discovery**; it doesn't talk to MCP, it
+doesn't make architectural decisions, and it doesn't render the proposal.
+You stay in charge of dialogue, type mapping, the chunked Phase 3 loop,
+and `commit_changes`. Treat the subagent's output as a draft inventory:
+trust the candidate names, don't blindly trust its type guesses — your
+metamodel-allowance check is still the source of truth.
+
+Sample subagent brief (paste into `Agent({subagent_type: 'Explore', ...})`):
+
+> Scan the repository at the current working directory. Return a compact
+> inventory of architectural candidates: deployable services (with their
+> language / runtime hint), data stores (with engine if visible), external
+> SaaS dependencies (Stripe, AWS, Google APIs, …), and obvious user roles
+> mentioned in the README. Skip `node_modules`, `vendor`, `target`,
+> `dist`, `build`, `.git`, `.env*`, `secrets/`, `*.pem`. Output as a flat
+> list: one element per line, `name — type — inferred_from(file:path)`.
+> No prose, no recommendations.
 
 ## Section 4 — Element creation patterns
 
@@ -336,6 +477,9 @@ Things you must avoid:
 10. **Translating user terms.** If they say "Auth", don't rename to "AuthenticationService" for "consistency". Their words go in `name`.
 11. **Committing without an artifact.** Every `commit_changes` from this skill MUST include exactly one `artifacts.create[]` entry with `place_all_in_batch: true`. Without it, the commit succeeds but the user lands on an empty canvas — the design-mode flow's worst end-state, and the reason epic 015 exists.
 12. **Touching existing artifacts.** The MCP surface only creates new diagrams; there's no in-place add-elements-to-existing-artifact tool yet. In brownfield, your new artifact is a *new* diagram, not an extension of an existing one. Don't promise the user otherwise.
+13. **Walls of text.** Phase 3 dumping 15 elements and 25 relationships in one message is the design-mode failure mode for users who came here to *discuss*, not *audit*. One slice per turn — see Phase 3 chunked-loop format.
+14. **Leaking metamodel jargon.** "Stdlib splits the vocabulary into two strata, allowance rule blocked the edge, personality mapping" — every one of these is internal vocabulary. Translate to plain words (Tone section). The user invoked a design skill, not a type-system tour.
+15. **Pre-walking allowance by guessing.** If you start proposing relationships and find out at `commit_changes` time that 9 of them got rejected, you've burned the user's confidence. Use the model's resolved metamodel from Phase 1 (or the dedicated allowance query tool when it lands) to filter what you propose *before* the dialogue. If the user describes a connection that isn't valid for their element types, rephrase the proposal — don't make them learn the validator.
 
 ## Section 7 — First-run quickstart mode
 

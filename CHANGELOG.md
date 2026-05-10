@@ -3,6 +3,44 @@
 All notable changes to the Arxlay System Design Skill are documented here.
 The project follows [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] — 2026-05-10
+
+### Added
+
+- **Tone section** at the top of SKILL.md: hide metamodel jargon
+  (`stdlib`, `ArchiMate`, `allowance`, `personality`, `baseTypeId`, raw
+  type ids) from user-facing replies. Substitute plain words via the
+  translation table. The user invoked a design skill, not a type-system
+  tour (B33).
+- **Chunked iterative Phase 3.** The proposal phase no longer dumps the
+  full draft in one wall of text. Instead, five strict slices —
+  anchor → modules → data → externals → cross-cutting relationships —
+  each ≈ 6 lines, each ending in one explicit confirmation question.
+  Cumulative draft state lives in the conversation; `commit_changes`
+  still fires exactly once at the end (B31, B34).
+- **Optional Explore subagent for code discovery.** Section 3 documents
+  when to offload repo scanning to a parallel `Explore` subagent during
+  Phase 2's code path — keeps file reads out of the main context and runs
+  alongside MCP warm-up. Single subagent, returns a flat inventory; the
+  main agent stays in charge of dialogue and `commit_changes` (B35
+  minimal version).
+
+### Changed
+
+- **Phase 4 refinement** is no longer a separate gate. Edits happen
+  *between* Phase 3 slices and are applied to the running draft state.
+  The only distinct moment is one consolidated recap immediately before
+  Phase 5 commit.
+- Phase 3 sample dialog rewritten in Russian to match the new chunked
+  loop; trade-off probing now happens in the **next** reply after a
+  user's choice, never piled into the same message.
+
+### Anti-patterns (Section 6) added
+
+- #13: walls of text in Phase 3.
+- #14: leaking metamodel jargon.
+- #15: guessing allowance and finding out at commit time.
+
 ## [0.4.0] — 2026-05-10
 
 ### Added
