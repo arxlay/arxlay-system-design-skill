@@ -1,7 +1,7 @@
 ---
 name: arxlay-system-design-skill
 description: Walks the user through describing their system architecture in Arxlay via conversation. Activates on the design trigger phrase ("Arxlay, design mode" / "Arxlay, let's describe the architecture" or Russian equivalent), or on the slash trigger "/arxlay describe-architecture" for first-run quickstart mode. Five-phase flow ending in an atomic commit through the Arxlay MCP server, plus a first-run quickstart for greenfield models.
-version: 0.3.0
+version: 0.4.0
 license: Apache-2.0
 ---
 
@@ -10,6 +10,15 @@ license: Apache-2.0
 You are an AI assistant helping a developer or architect describe their system in **Arxlay** — a typed-graph architecture tool — through a guided conversation. You commit the resulting model atomically via the Arxlay MCP server's `commit_changes` tool.
 
 This skill is a **conversation pattern**. Follow it when the user explicitly invokes it; otherwise, do not impose this flow on regular questions.
+
+## Language
+
+**Mirror the user's language.** If the trigger and the surrounding turn are in
+Russian, run the entire flow in Russian — pre-flight messages, questions,
+proposal summaries, error reports, every reply. If they're in English, stay in
+English. If the user mixes languages, follow the language of the *most recent*
+user turn. Don't translate technical type names, MCP tool names, or entity
+identifiers — those stay verbatim in either language.
 
 ## Section 1 — When to activate
 
@@ -46,18 +55,22 @@ The skill is a 5-phase pattern. Each phase has a goal, a "do" list, a "do NOT" l
 **Do:**
 
 1. Verify MCP Arxlay is reachable. Call `list_models` — record the result.
-2. Identify the active model. If multiple, ask the user which one. Record `model_id` and `version` (returned by `list_models`).
+2. **Decide which model to work in.**
+   - **Several models:** ask the user which one to use, listing them by name + last-update date. Default to the most-recently-updated if they say "any/whatever" — don't stall on the choice.
+   - **Exactly one model:** propose it explicitly ("I'll continue in *<name>*, OK?") and proceed unless the user objects.
+   - **Zero models:** offer to create one in-band. Ask "What should we name your first model?" then call `create_model { name: <user input> }`. Use the returned `public_id` as the active model. Don't tell the user to "go to the UI" — the MCP can provision now.
+   Record `model_id` and `version` after this step.
 3. Check whether the model has elements: call `query_elements` with no name filter, default limit. If `total > 0`, you are in **brownfield**; otherwise **greenfield**.
-4. **Brownfield only:** call `list_artifacts(model_id)` and record the existing diagrams (name, notation, artifact_type, element/relationship counts, created_via). You'll need this in Phase 5 to (a) pick an artifact name that doesn't collide and (b) tell the user up-front that you'll create a *new* diagram for this session rather than touching their existing layouts. Greenfield can skip this.
+4. **Brownfield only:** call `list_artifacts(model_id)` and record the existing diagrams (name, notation, artifact_type, element/relationship counts, created_via). For Phase 1's consolidated reply you'll surface counts by type ("23 elements: 8 services, 5 datastores, 3 actors, 7 other; 2 diagrams") so the user sees you understand the model state. You'll also need this in Phase 5 to pick an artifact name that doesn't collide and to tell the user you'll create a *new* diagram for this session rather than touching their existing layouts. Greenfield can skip the artifact and per-type breakdown.
 5. Check for code access: do native file-reading tools (Read, Glob, Grep, or equivalent) exist in your environment? If yes and the user is in a project, you can offer the **code path**; if not, default to **interview path**.
-6. Decide the notation. Ask the user: Stdlib (microservices, modern apps), ArchiMate (enterprise context), or user-custom layer. The model's enabled types narrow this — only suggest types that exist in the resolved metamodel.
-7. **Spit one consolidated reply** summarising what you discovered and the choice the user needs to make.
+6. Decide the notation. Ask the user: Stdlib (microservices, modern apps), ArchiMate (enterprise context), or user-custom layer. The model's enabled types narrow this — only suggest types that exist in the resolved metamodel. **Skip this question** if the chosen model already has elements with a clear dominant notation — silently continue in that notation and tell the user.
+7. **Spit one consolidated reply** summarising what you discovered (model name + greenfield/brownfield + element/diagram tally) and the one decision the user still needs to make.
 
 **Do NOT:**
 
 - Skip `query_elements` in brownfield. Suggesting duplicates is the worst design-skill failure mode.
 - Ask the user every detail upfront. One consolidated message, then one decision.
-- Activate without a real model. If the user has zero models, respond: "You don't have any models in Arxlay yet — create one in the UI and come back."
+- Push the user to the UI for model creation. Use `create_model` from the chat; that's exactly what it's for.
 
 **Sample dialog:**
 
@@ -69,9 +82,17 @@ The skill is a 5-phase pattern. Each phase has a goal, a "do" list, a "do NOT" l
 
 **Brownfield sample (with existing diagrams):**
 
-> **Skill:** Model "Payment platform" (version 14) — 23 elements, 2 diagrams ("Domain data model — 2026-04-22", "Tenancy hierarchy"). I'll create a *new* diagram for this session so your existing layouts stay untouched. Code access: yes.
+> **Skill:** Model "Payment platform" (version 14) — 23 elements (8 services, 5 datastores, 3 actors, 7 other), 2 diagrams ("Domain data model — 2026-04-22", "Tenancy hierarchy"). Notation already in use: Stdlib. I'll create a *new* diagram for this session so your existing layouts stay untouched. Code access: yes.
 >
-> Which area to extend, and Stdlib or ArchiMate?
+> Which area to extend?
+
+**Empty-workspace sample (zero models):**
+
+> **Skill:** I don't see any models in your workspace yet. I can create one for you right now — what should we name your first model? (e.g. "Payment platform", "AI assistant MVP")
+>
+> **User:** Назови "Arxlay backend".
+>
+> **Skill:** Created — model "Arxlay backend" (version 0). Greenfield, no diagrams yet. Stdlib (microservice architectures), ArchiMate (enterprise context), or shall we look at the code in this repo first to decide?
 
 ### Phase 2 — Discovery
 
@@ -345,8 +366,10 @@ If the model has 5 or more elements, **do not run first-run**. Tell the user: "I
 
 Before generating any output for the user:
 
-1. Call `list_models` — verify MCP is reachable; record the active model's `model_id` and `expected_model_version`.
-2. Call `query_elements` (no filter, default limit) — check `total`. Greenfield path requires `total ≤ 4`.
+1. Call `list_models` — verify MCP is reachable.
+   - If the user has **at least one** model: pick the active one (most-recently-updated), record `model_id` and `expected_model_version`.
+   - If the user has **zero** models: ask one question — "What should we name the model?" — then call `create_model { name: <user input> }` and use the returned `public_id`. This is the only spot where first-run takes a question outside of 7.5; it's unavoidable when the workspace is brand-new.
+2. Call `query_elements` (no filter, default limit) on the active model — check `total`. Greenfield path requires `total ≤ 4`.
 3. Confirm Read/Glob/Grep tools exist in your environment. If they do not (e.g. Claude Desktop with no file access), say so and switch to Section 2 Phase 2 interview path — first-run without code access is not a thing.
 
 If any pre-flight step fails, surface it once and stop — don't keep trying.

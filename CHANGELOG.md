@@ -3,6 +3,31 @@
 All notable changes to the Arxlay System Design Skill are documented here.
 The project follows [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] — 2026-05-10
+
+### Added
+
+- **Language mirroring rule** at the top of SKILL.md. The skill now stays in
+  the user's language (English / Russian / mixed) for every reply — pre-flight
+  messages, questions, proposals, errors. Previously, replies defaulted to
+  English unless the user explicitly asked otherwise (founder feedback B28).
+- **`create_model` tool support in Phase 1 and Section 7.2.** When
+  `list_models` returns empty, the skill now asks for a model name and calls
+  the new MCP `create_model` tool to provision one in-band. Replaces the
+  previous "go create one in the UI and come back" dead-end (B29).
+- **Brownfield model awareness in Phase 1.** The Phase 1 consolidated reply
+  now surfaces a per-type element breakdown (e.g. "23 elements: 8 services,
+  5 datastores, 3 actors, 7 other; 2 diagrams") and skips the notation
+  question when the existing model already has a clear dominant notation —
+  so the user sees the skill understands the model before being asked
+  anything (B30).
+
+### Changed
+
+- Phase 1 step 2 now distinguishes 0 / 1 / N model cases explicitly.
+- Section 7.2 step 1 handles the empty-workspace case via `create_model`;
+  the only first-run question that lives outside 7.5.
+
 ## [0.3.0] — 2026-05-09
 
 ### Added
