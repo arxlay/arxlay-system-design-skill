@@ -3,6 +3,57 @@
 All notable changes to the Arxlay System Design Skill are documented here.
 The project follows [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] — 2026-05-11
+
+### Added
+
+- **Phase 2 type triage** — fast inference step at the end of Phase 2,
+  before any Phase 3 draft. Three questions against the inventory (data
+  store? external SaaS? human rank?) pick the correct stratum
+  (`microservice` vs `system`, `user` vs `role`) up-front so commit
+  doesn't reject cross-stratum edges. Closes the root cause from the
+  2026-05-11 model `w0oG5BPQq1g6` session where 9 `system → database`
+  edges were rejected.
+- **Phase 3 proactive allowance check.** Skill now calls
+  `query_allowed_relationships` (MCP backend tool shipped 2026-05-11,
+  epic 016) for any non-trivial pair — cross-stratum, custom layer,
+  non-default notation. The tool is the source of truth; the
+  cheat-sheet is the fast path. Failure modes spelled out:
+  `allowed: []` → propose intermediate / swap type / report honestly;
+  proposed rel not in `allowed` → pick `allowed[0]` or by semantic fit
+  and *say what you swapped*.
+- **Section 4 cheat-sheet** with seven Stdlib v1.0.0 patterns (system /
+  microservice / module / user / role / database / external-system).
+  Each row carries the "why this and not the obvious neighbour"
+  disambiguation reason — covers ~95% of design-mode sessions without
+  needing the allowance tool.
+
+### Changed
+
+- **Anti-pattern #15** updated — the allowance query tool is no longer
+  hypothetical. Reference it explicitly as the source of truth, with the
+  cheat-sheet as the fast path.
+- **Relationship picker** in Section 4 — `microservice → database` now
+  uses `arxlay:storesIn`, not `arxlay:uses`. Matches the Stdlib v1.0.0
+  allowance set documented in the wiki memory note
+  `archimate-allowance-stricter-than-spec`.
+
+### Anti-patterns added
+
+- **#16: Skipping Phase 2 type triage.** Naming everything
+  `arxlay:system` because the user said "service" is the most common
+  reason a session ends with rejected `system → database` edges. Triage
+  is inference, not a question — but if the inventory is ambiguous,
+  ask *before* type assignment, not after commit rejection.
+
+### Epic context
+
+Released as the deliverable of arxlay-wiki epic 023 (skill smart
+inference и proactive allowance), which depended on epic 016
+(`query_allowed_relationships` MCP tool — backend shipped earlier the
+same day, arxlay-monorepo commit `6e177bc`). Calibration retro
+scheduled after 4 design-mode sessions (target ≈Q3 2026).
+
 ## [0.5.0] — 2026-05-10
 
 ### Added

@@ -153,6 +153,46 @@ This converts trade-offs into first-class artefacts of the session, not post-hoc
 - Ask the same question twice — keep state across rounds.
 - Skip ownership questions in any team context.
 
+**Type triage — runs at the end of Phase 2, before Phase 3 draft.**
+
+Before you start naming types in proposals, run a fast self-check against
+the inventory you just built. The metamodel splits some concepts into
+two strata that don't talk to each other (e.g. Stdlib `system` lives in
+the logical-container layer; `microservice` lives in the deployable
+layer — and the layers have no allowance bridge between them). If you
+pick the wrong stratum up front, you'll discover it at `commit_changes`
+time as 9 rejected relationships, and the user pays for the round trip.
+
+Run through the **type cheat-sheet in Section 4** in order. The triage
+is a sequence of three questions, each answered against the inventory:
+
+1. **Is there a data store (DB, queue, cache) in scope?**
+   If yes → containers that *write into it* are `arxlay:microservice`,
+   not `arxlay:system`. Stdlib only allows `microservice → database`
+   storesIn, never `system → database`.
+2. **Are there third-party / external services (Google OAuth, Stripe,
+   SMTP, Sentry) in scope?**
+   If yes → containers that *call them* are `arxlay:microservice`, not
+   `arxlay:system`. Same allowance reason.
+3. **Is there a human user in scope?**
+   If they're an anonymous-ish end-user (logs into your app) →
+   `arxlay:user`. If they have an organisational role/rank (engineer,
+   architect, owner) → `arxlay:role`. The distinction matters because
+   `user → system uses` is allowed, but `role → system uses` is not
+   (only `role → team / department / location / role`).
+
+This is **inference**, not a question for the user. The triage runs in
+your head; the *result* — what type each candidate gets — is what you
+propose in Phase 3 slices. If a triage rule isn't obvious from the
+inventory (e.g. the container both contains modules AND talks to a DB)
+ask in Phase 2 *before* type assignment: "Auth service — оно держит
+сессии в БД, или просто логический контейнер для модулей?" Don't make
+the user untangle the type system after the fact.
+
+When in doubt — or when the inventory looks unusual (e.g. notation that
+isn't Stdlib, custom layer enabled) — **query the metamodel before
+naming**: see Phase 3's `query_allowed_relationships` step.
+
 ### Phase 3 — Proposal (chunked, iterative)
 
 **Goal:** build the draft together one slice at a time, never as one wall of
@@ -196,13 +236,64 @@ Each slice fits in ≈6 lines. The user can scan it without scrolling.
   paragraphs joined by ---". One slice, one reply.
 - Show JSON or YAML.
 - Surface metamodel jargon when describing element types (see Tone).
-- Pre-validate by guessing allowance. Use the resolved-metamodel data you
-  collected in Phase 1 (or, when it lands, the dedicated allowance query
-  tool). When you can't connect A to B with the relationship you wanted,
-  rephrase: propose a different relationship or a different intermediate
-  element — don't make the user solve the type system.
+- Pre-validate by guessing allowance. Two layers of defense, in order:
+  (1) cheat-sheet inference from Section 4 + Phase 2 type triage; (2)
+  for any pair that isn't trivial-known (cross-layer, custom layer,
+  non-archimate notation) **call `query_allowed_relationships` before
+  you write the slice**. When the validator says "no" for the proposed
+  rel type, take `allowed[0]` from the response and explain the swap in
+  the slice prose — don't silently substitute, and don't make the user
+  solve the type system at commit time.
 - Commit anything until Phase 5. Phase 3 is conversation; the cumulative
   draft state lives in your context, not in the model.
+
+**Proactive allowance check — call `query_allowed_relationships`.**
+
+The MCP tool returns the allowed relationship types for a given
+`(model_id, source_type_id, target_type_id, notation_id?)` tuple. Use
+it during slice composition, not after commit rejection:
+
+```
+query_allowed_relationships {
+  model_id: "<from Phase 1>",
+  source_type_id: "arxlay:microservice",
+  target_type_id: "arxlay:database",
+  notation_id: "archimate"   // optional, defaults to "archimate"
+}
+→ { allowed: [
+    { relationship_type_id: "arxlay:storesIn", validation_level: "strict" }
+  ] }
+```
+
+**When to call:**
+
+- Every cross-stratum pair the triage flagged as ambiguous
+  (system ↔ microservice, microservice ↔ database, role ↔ system, etc).
+- Every pair using a non-default notation (`bpmn`, `c4`, custom).
+- When the model has a user-custom layer enabled — your training data is
+  stale by definition.
+
+**When to skip:**
+
+- Trivially-known pairs you've already seen in this session
+  (`system → module contains`, `microservice → microservice calls`,
+  `microservice → external-system uses`).
+- After two calls returning the same allowed set for the same
+  source/target pattern — cache that answer in your head for the
+  remainder of the slice.
+
+**Failure modes:**
+
+- `allowed: []` (empty) — no rel type connects these two types in this
+  model. Don't force it. Either propose a different intermediate
+  element, switch one type (e.g. promote `system` to `microservice` if
+  data-store edge is required), or tell the user "I can't connect X to
+  Y in this metamodel — want me to add Z as an intermediate?".
+- Proposed rel type not in `allowed` — pick `allowed[0]` if there's
+  a single option, otherwise pick by semantic fit (e.g. prefer
+  `composedOf` over `association` for hierarchical relationships). In
+  the slice, **say what you swapped and why** in one short line — keeps
+  the user's mental model in sync.
 
 **Track state explicitly.** After each accepted slice, keep a running
 inventory in your head: `accepted_elements[]`, `accepted_relationships[]`,
@@ -406,25 +497,47 @@ Use Arxlay's typed metamodel. The active model has **enabled types** — only th
 - **arxlay-stdlib** — modern microservices vocabulary: `arxlay:system`, `arxlay:module`, `arxlay:entity`, `arxlay:event`, `arxlay:interface`, `arxlay:team`, `arxlay:role`, `arxlay:department`, `arxlay:location`. Relationships: `arxlay:calls`, `arxlay:contains`, `arxlay:uses`, `arxlay:owns`, `arxlay:emits`, `arxlay:listens`, `arxlay:exposes`, `arxlay:invokes`, `arxlay:assignedTo`, `arxlay:leads`, `arxlay:locatedAt`, `arxlay:reportsTo`.
 - **archimate-3.2** — full ArchiMate 3.2 element/relationship set for enterprise context.
 
-**Choosing a type:**
+**Type cheat-sheet (Stdlib v1.0.0).**
 
-- Public-facing application (auth, payments, web app) → `arxlay:system`.
-- Internal logical component (auth-engine module inside Auth Service) → `arxlay:module`.
-- Database / data store → `arxlay:entity` (the row-level concept). Don't confuse with ArchiMate `application-collaboration`.
-- API endpoint or service boundary → `arxlay:interface`.
-- Domain event (UserCreated, OrderShipped) → `arxlay:event`.
-- Team or org unit → `arxlay:team` or `arxlay:department`.
+These are the seven patterns that cover ~95% of design-mode sessions.
+Use them in **Phase 2 type triage** before naming anything, and again in
+**Phase 3** as the default; for anything outside this list, query the
+allowance tool. The patterns are ordered by how often they collide in
+practice — system vs microservice first, role vs user later.
 
-**Choosing a relationship:**
+| # | Signal | Type | Why this and not the obvious neighbour |
+|---|---|---|---|
+| a | Container for logical modules, no DB or external SaaS touch | `arxlay:system` | `system → module` contains is allowed; `system → database` and `system → external-system` are NOT — only `microservice` reaches data/external strata. |
+| b | Container that stores data (DB row, queue, cache) OR calls external SaaS (Stripe, Google, SMTP) | `arxlay:microservice` | `microservice → database storesIn` and `microservice → external-system uses` are the only edges Stdlib allows. Pick this even if the unit is "obviously a system" semantically — type follows allowance. |
+| c | Internal logical component inside a system/microservice (auth-engine, session-handler) | `arxlay:module` | `system → module contains` and `microservice → module contains` both allowed. Modules cannot directly touch DB / external — the parent does. |
+| d | Anonymous-ish human (end-user, customer, signup-funnel actor) | `arxlay:user` | `user → system uses` is allowed. `user → microservice uses` is allowed. Use this when the actor has no organisational rank. |
+| e | Human with organisational role (engineer, architect, owner, ops) | `arxlay:role` | `role → team / department / location / role` only. **Cannot** directly use a system/microservice — model as `role → team → uses → system` or use `arxlay:user` if the rank doesn't matter for the diagram. |
+| f | Data store (Postgres, MySQL, Redis, queue) | `arxlay:database` | Always paired with a `microservice` parent via `storesIn`. Don't use `arxlay:entity` here — that's row-level domain modelling, not infrastructure. |
+| g | Third-party service we don't own (Google OAuth, Stripe, SMTP relay, Sentry) | `arxlay:external-system` | Always reached *from* a `microservice` via `uses`. `external-system` is never a source in Stdlib allowance — it sits at the edge of the graph. |
 
-- Network call API/RPC → `arxlay:calls`.
+**Choosing a relationship (after the type cheat-sheet has settled the
+endpoints):**
+
+- Network call API/RPC between microservices → `arxlay:calls`.
 - Hierarchical containment (System contains Modules) → `arxlay:contains`.
-- Reads/writes data → `arxlay:uses`.
-- Owns the lifecycle → `arxlay:owns`.
+- Microservice ↔ database → `arxlay:storesIn` (not `uses`).
+- Microservice ↔ external-system → `arxlay:uses`.
+- Owns the lifecycle (rare; team owns a service) → `arxlay:owns`.
 - Producer of an event → `arxlay:emits` (target = event).
 - Consumer of an event → `arxlay:listens` (source = event).
 
-The metamodel's **allowance rules** restrict which (source-type, target-type, relationship-type) tuples are valid. If `commit_changes` returns `relationship_not_allowed`, the type is wrong — re-classify or swap to a more general relationship.
+**When in doubt — query.** If the inventory falls outside the seven
+patterns above (e.g. a custom layer is enabled, the notation isn't
+Stdlib, or the pair is exotic like `arxlay:interface → arxlay:event`),
+call `query_allowed_relationships` from Phase 3 instead of guessing.
+The cheat-sheet is the fast path; the tool is the source of truth.
+
+The metamodel's **allowance rules** restrict which (source-type,
+target-type, relationship-type) tuples are valid. If you reach
+`commit_changes` and get `relationship_not_allowed`, you skipped one
+of: (1) Phase 2 triage, (2) Section 4 cheat-sheet, or (3) the Phase 3
+allowance query. Don't retry blindly — re-classify the offending element
+and tell the user what you changed and why.
 
 **`description` field** — this is where trade-offs live (see Section 5). Set via `fields.identity.description` (markdown). Keep elements under ~600 words of description; longer means it's actually two elements.
 
@@ -479,7 +592,8 @@ Things you must avoid:
 12. **Touching existing artifacts.** The MCP surface only creates new diagrams; there's no in-place add-elements-to-existing-artifact tool yet. In brownfield, your new artifact is a *new* diagram, not an extension of an existing one. Don't promise the user otherwise.
 13. **Walls of text.** Phase 3 dumping 15 elements and 25 relationships in one message is the design-mode failure mode for users who came here to *discuss*, not *audit*. One slice per turn — see Phase 3 chunked-loop format.
 14. **Leaking metamodel jargon.** "Stdlib splits the vocabulary into two strata, allowance rule blocked the edge, personality mapping" — every one of these is internal vocabulary. Translate to plain words (Tone section). The user invoked a design skill, not a type-system tour.
-15. **Pre-walking allowance by guessing.** If you start proposing relationships and find out at `commit_changes` time that 9 of them got rejected, you've burned the user's confidence. Use the model's resolved metamodel from Phase 1 (or the dedicated allowance query tool when it lands) to filter what you propose *before* the dialogue. If the user describes a connection that isn't valid for their element types, rephrase the proposal — don't make them learn the validator.
+15. **Pre-walking allowance by guessing.** If you start proposing relationships and find out at `commit_changes` time that 9 of them got rejected, you've burned the user's confidence. **The allowance query tool is here now** — call `query_allowed_relationships` during Phase 3 for any non-trivial pair (cross-stratum, custom layer, non-default notation). The Section 4 cheat-sheet covers the common path; the tool is the source of truth for everything else. If the user describes a connection that isn't valid for their element types, rephrase the proposal — don't make them learn the validator.
+16. **Skipping Phase 2 type triage.** Naming everything `arxlay:system` because the user said "service" is the most common reason a session ends with 9 rejected `system → database` edges. Run the three triage questions from end of Phase 2 (data store? external SaaS? human rank?) and pick `microservice` / `user` / `role` accordingly. Triage is inference, not a question — but if the inventory is genuinely ambiguous, ask **before** type assignment, not after commit rejection.
 
 ## Section 7 — First-run quickstart mode
 
