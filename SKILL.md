@@ -382,6 +382,31 @@ and save?" — and wait for the explicit approval (Phase 5).
 >
 > Сохраняем?
 
+**Nesting heuristic (≥3 contains-from-same-source).** Before the final
+recap, scan the cumulative `accepted_relationships[]` for `contains`-class
+edges (Stdlib `contains`, ArchiMate `composition` / `aggregation` /
+`composedOf`). If three or more such edges share the same `source`,
+**propose visual nesting** for that container — render its children
+inside its bounding box on the canvas, not as separate boxes connected
+by parallel arrows.
+
+In the recap, frame it as one question:
+
+> **Skill:** В Auth Service шесть модулей сидит — отрисую их
+> *внутри* Auth Service (вложенные блоки), а не плоско стрелками. ОК?
+>
+> **User:** да
+
+If the user agrees, populate `artifacts.create[0].placements[]` at
+commit time (see Phase 5 step 6 below); the contains-edges still go in
+`relationships.create[]` — `placements[]` is purely the rendering hint.
+If the user declines, fall back to flat `place_all_in_batch: true`.
+
+Don't suggest nesting for <3 contains-from-same-source — two children
+read fine as siblings; three or more becomes wall-of-arrows. Don't
+nest more than 3 levels deep (frontend `useGroupingStore` ceiling) —
+if depth >3 emerges, surface to the user and ask which layer to flatten.
+
 ### Phase 5 — Approve & commit
 
 **Goal:** atomically save the draft via `commit_changes` AND make it visible on a canvas the user can open.
@@ -404,14 +429,17 @@ and save?" — and wait for the explicit approval (Phase 5).
      - `name` — short summary of *this* commit's slice (e.g. "Domain data model — 2026-05-09", "Auth surface", "Tenancy hierarchy"). In brownfield, make sure the name doesn't collide with the diagrams you saw in Phase 1; suffix " (2)" if it would.
      - `notation` — `"archimate"` for ArchiMate models, `"archimate"` or `"c4"` for stdlib models (stdlib types personality-map onto ArchiMate). Match the user's chosen vocabulary from Phase 1.
      - `artifact_type` — `"graph"` is the default and what you should use unless the user explicitly asked for a sequence diagram, BPMN flow, or whiteboard. The validator gates `bpmn`/`sequence`/`whiteboard` artifact types to matching notations.
-     - `place_all_in_batch: true` — lets the server place every element + relationship from this commit on the new artifact without you spelling out the lists. This is the V1 default; only fall back to explicit `place_elements` / `place_relationships` if the user explicitly asks for a partial diagram.
+     - **Placement form — pick ONE of three:**
+       - `place_all_in_batch: true` (default — flat layout, ELK auto-positions every node on first canvas view). Use when the diagram is small / linear, no nesting decision was taken in the heuristic above.
+       - `place_elements: [...]` / `place_relationships: [...]` (explicit partial diagram) — only when the user asked for a subset.
+       - `placements: [{public_id, parent_element_public_id?, width?, height?, position?{x,y}}]` (epic 022 — visual nesting). Use when the nesting heuristic above triggered. Each entry covers one element; `parent_element_public_id` references another element in the same placements set and must have a `contains`-class relationship from parent → child in `relationships.create[]`. Width is clamped to [80, 1200] px; height to [40, 800] px; both optional (auto-fit if omitted). `position.x/y` is also optional (ELK auto-lays out if omitted). Combine with `place_relationships: [...]` if a subset of edges should appear; otherwise list all edges through this artifact via a separate call. **`placements[]` is mutually exclusive with `place_all_in_batch` and `place_elements`** — the validator returns `artifact_placement_conflict` if you mix them.
    - The trade-off markdown goes in `fields.identity.description` of each element (see Section 5).
 7. On success:
    - Read `artifacts_created[0].canvas_url` from the response — that's the direct link to the new diagram.
    - Reply with: counts (elements/relationships/artifacts), new `model_version`, and the **canvas URL as a clickable link**. Example: "Saved 8 elements + 9 relationships + 1 artifact 'Domain data model — 2026-05-09'. Model version: 14. Open it: <canvas_url>".
    - Tell the user the layout is auto-computed on first canvas view (ELK pass) — they may want to nudge nodes around.
 8. On `version_conflict`: someone else committed since Phase 1. Re-read with `get_schema` or `list_models`, present the new state, offer to merge — do NOT auto-merge.
-9. On `validation_failed`: walk back to Phase 4 with the specific `details[]` paths and explain the issue in user-friendly prose ("The type `microservice` is not enabled in this model — switch to `system`?"). Artifact-specific codes you may see: `artifact_notation_invalid`, `artifact_type_invalid`, `artifact_notation_type_mismatch`, `artifact_placement_conflict`, `artifact_placement_missing_endpoint`, `artifact_name_required`. All are friendly Phase A errors — surface them, propose the fix, retry with a fresh idempotency key.
+9. On `validation_failed`: walk back to Phase 4 with the specific `details[]` paths and explain the issue in user-friendly prose ("The type `microservice` is not enabled in this model — switch to `system`?"). Artifact-specific codes you may see: `artifact_notation_invalid`, `artifact_type_invalid`, `artifact_notation_type_mismatch`, `artifact_placement_conflict`, `artifact_placement_missing_endpoint`, `artifact_name_required`. Epic 022 nesting codes: `artifact_placement_parent_missing` (parent ref isn't in the same placements set), `artifact_placement_parent_no_contains` (no contains-class relationship from parent → child in this batch), `artifact_placement_cycle` (parent chain forms a cycle), `artifact_placement_bad_size` (width or height outside the 80×40 — 1200×800 clamp). All are friendly Phase A errors — surface them, propose the fix, retry with a fresh idempotency key.
 10. On `permission_denied`: stop. The user lacks write access; tell them and end the session.
 
 **Do NOT:**

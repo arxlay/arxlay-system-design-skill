@@ -3,6 +3,39 @@
 All notable changes to the Arxlay System Design Skill are documented here.
 The project follows [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] — 2026-05-11
+
+### Added
+
+- **Phase 4 nesting heuristic.** Before the pre-commit recap, scan
+  cumulative `accepted_relationships[]` for `contains`-class edges
+  (Stdlib `contains`, ArchiMate `composition` / `aggregation` /
+  `composedOf`). If ≥3 such edges share the same `source`, propose
+  rendering the children *inside* the container instead of as flat
+  parallel arrows. One yes/no question; default is flat if the user
+  declines or the threshold isn't reached. Cap depth at 3 levels
+  (matches the frontend `useGroupingStore` ceiling).
+- **Phase 5 `placements[]` option.** New mutually-exclusive third
+  placement form (epic 022 backend wire, shipped same day): per-element
+  carrier for optional `parent_element_public_id`, `width`, `height`,
+  `position.{x,y}`. Width clamp [80, 1200] px; height clamp [40, 800] px.
+  Documented as the choice when the nesting heuristic triggers.
+- **New artifact-validation error codes** surfaced in Phase 5 error
+  handling: `artifact_placement_parent_missing`,
+  `artifact_placement_parent_no_contains`,
+  `artifact_placement_cycle`, `artifact_placement_bad_size`. Friendly
+  Phase A errors — fix the placements, retry with fresh idempotency.
+
+### Epic context
+
+Released as the deliverable of epic 022 (sizes + nesting via MCP).
+Backend ships `commitArtifactCreateArgs.placements[]` and
+`SnapshotPosition.parent_element_public_id`; frontend hydrates
+`Diagram.nodeParentMap` from the snapshot so ReactFlow's `parentNode`
+renders nested containers without an explicit drag-in. Closes the
+visual-coupling concern from the 2026-05-11 model `w0oG5BPQq1g6`
+session where 12 `contains` edges remained as flat arrows.
+
 ## [0.6.0] — 2026-05-11
 
 ### Added
