@@ -3,6 +3,48 @@
 All notable changes to the Arxlay System Design Skill are documented here.
 The project follows [Semantic Versioning](https://semver.org/).
 
+## [0.7.1] — 2026-05-11
+
+### Fixed — failure mode caught in real session
+
+First production run of v0.7.0 (founder's model `w0oG5BPQq1g6`,
+2026-05-11 evening session) revealed the nesting heuristic was **too
+soft**. The skill mentioned nesting in the recap prose ("modules will
+lay inside their systems via ELK") but committed flat
+(`place_all_in_batch: true`) and assumed ELK auto-nests on contains —
+which it doesn't. Result: 25 relationships drawn as stretched arrows,
+modules crammed in one heap, two parallel edges between same nodes
+stacked their labels.
+
+### Strengthened
+
+- **Phase 4 nesting heuristic** rewritten as a 4-step mandatory
+  protocol (scan → ask → commit form when agreed → fall-back when
+  declined). Each step has explicit "must" wording; the section opens
+  with "MANDATORY step before Phase 5 — this step is not optional".
+- **Explicit `placements[]` instruction** in Step 3 — Switch the
+  commit form to `placements[]`, NOT `place_all_in_batch`. Bullet-list
+  spelling out parent_element_public_id population per child and
+  parent-omit semantics for top-level elements.
+- **Step 4 fall-back path** documented — if user declines nesting,
+  use flat and tell them the canvas will use stretched containment
+  arrows.
+
+### Anti-pattern added
+
+- **#17: Assuming ELK auto-nests on contains-relationships.** Explicit
+  failure-narrative list — three phrasings that signal this anti-pattern
+  ("modules will lay inside their systems via ELK auto-layout", "the
+  layout will compute on first canvas view to nest", "ELK will nest
+  them automatically"). All three describe behavior the renderer
+  doesn't have — explicit parent metadata required.
+
+### Epic context
+
+Bug-fix release of v0.7.0 (epic 022 deliverable). Frontend
+parallel-edge label overlap caught in the same session is a separate
+defect — opened as wiki task in arxlay-monorepo.
+
 ## [0.7.0] — 2026-05-11
 
 ### Added

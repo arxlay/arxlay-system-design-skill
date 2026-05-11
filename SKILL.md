@@ -382,30 +382,59 @@ and save?" — and wait for the explicit approval (Phase 5).
 >
 > Сохраняем?
 
-**Nesting heuristic (≥3 contains-from-same-source).** Before the final
-recap, scan the cumulative `accepted_relationships[]` for `contains`-class
-edges (Stdlib `contains`, ArchiMate `composition` / `aggregation` /
-`composedOf`). If three or more such edges share the same `source`,
-**propose visual nesting** for that container — render its children
-inside its bounding box on the canvas, not as separate boxes connected
-by parallel arrows.
+**Nesting heuristic — MANDATORY step before Phase 5.** This step is
+not optional. Run it on every multi-element commit.
 
-In the recap, frame it as one question:
+**Step 1 — scan.** Before drafting the pre-commit recap, walk
+`accepted_relationships[]` and count contains-class edges (Stdlib
+`contains`, ArchiMate `composition` / `aggregation` / `composedOf`)
+grouped by `source`. If at least one `source` has ≥3 contains-children,
+nesting is **on the table** — do not skip to commit.
+
+**Step 2 — ask, don't assume.** ELK does **NOT** auto-nest on
+contains-relationships. A flat `place_all_in_batch: true` commit
+produces a flat diagram with stretched contains-arrows across the
+canvas — exactly the wall-of-arrows failure mode this heuristic
+exists to prevent. **The only way to get nested rendering is to send
+`artifacts.create[0].placements[]` with `parent_element_public_id` for
+every nested child** (see Phase 5 step 6 — third placement form,
+mutually exclusive with `place_all_in_batch`).
+
+Frame the decision as one yes/no question in the recap:
 
 > **Skill:** В Auth Service шесть модулей сидит — отрисую их
-> *внутри* Auth Service (вложенные блоки), а не плоско стрелками. ОК?
+> *внутри* Auth Service (вложенные блоки), не плоско стрелками. ОК?
 >
 > **User:** да
 
-If the user agrees, populate `artifacts.create[0].placements[]` at
-commit time (see Phase 5 step 6 below); the contains-edges still go in
-`relationships.create[]` — `placements[]` is purely the rendering hint.
-If the user declines, fall back to flat `place_all_in_batch: true`.
+**Step 3 — commit form when nesting agreed.**
 
-Don't suggest nesting for <3 contains-from-same-source — two children
-read fine as siblings; three or more becomes wall-of-arrows. Don't
-nest more than 3 levels deep (frontend `useGroupingStore` ceiling) —
-if depth >3 emerges, surface to the user and ask which layer to flatten.
+- Switch the commit form to `placements[]` (NOT `place_all_in_batch`).
+- For every child of an over-threshold parent, emit
+  `{public_id, parent_element_public_id: "<parent_pid>"}`.
+- For every other element on the artifact (top-level system, not a
+  contains-child, or under-threshold parent), emit `{public_id}` with
+  parent omitted = top-level on the canvas.
+- `place_relationships: [...]` still lists every edge to draw — same
+  list as you would have given to `place_all_in_batch`. The
+  contains-edges that drive nesting stay in this list; the renderer
+  hides the redundant edge automatically when source/target are
+  visually nested as parent/child (epic 022 frontend hook).
+
+**Step 4 — fall-back when nesting declined.** Flat
+`place_all_in_batch: true` is fine; tell the user the canvas will use
+stretched arrows for containment.
+
+**Anti-pattern (failure mode this heuristic exists to fix).** Do **not**
+write phrases like "modules will lay inside their systems via ELK
+auto-layout" or "the layout will compute on first canvas view to
+nest". ELK does not nest on contains. If you reach Phase 5 without
+having run Step 1, walk back: the recap *is* incomplete.
+
+**Caps.** Don't suggest nesting for <3 contains-from-same-source — two
+children read fine as siblings. Don't nest more than 3 levels deep
+(frontend `useGroupingStore` ceiling) — if depth >3 emerges, surface
+to the user and ask which layer to flatten.
 
 ### Phase 5 — Approve & commit
 
@@ -622,6 +651,7 @@ Things you must avoid:
 14. **Leaking metamodel jargon.** "Stdlib splits the vocabulary into two strata, allowance rule blocked the edge, personality mapping" — every one of these is internal vocabulary. Translate to plain words (Tone section). The user invoked a design skill, not a type-system tour.
 15. **Pre-walking allowance by guessing.** If you start proposing relationships and find out at `commit_changes` time that 9 of them got rejected, you've burned the user's confidence. **The allowance query tool is here now** — call `query_allowed_relationships` during Phase 3 for any non-trivial pair (cross-stratum, custom layer, non-default notation). The Section 4 cheat-sheet covers the common path; the tool is the source of truth for everything else. If the user describes a connection that isn't valid for their element types, rephrase the proposal — don't make them learn the validator.
 16. **Skipping Phase 2 type triage.** Naming everything `arxlay:system` because the user said "service" is the most common reason a session ends with 9 rejected `system → database` edges. Run the three triage questions from end of Phase 2 (data store? external SaaS? human rank?) and pick `microservice` / `user` / `role` accordingly. Triage is inference, not a question — but if the inventory is genuinely ambiguous, ask **before** type assignment, not after commit rejection.
+17. **Assuming ELK auto-nests on contains-relationships.** It does NOT. A flat `place_all_in_batch: true` commit produces flat layout with stretched containment-arrows across the canvas, irrespective of how many `contains` edges you put in `relationships.create[]`. The Phase 4 nesting heuristic exists to catch this — if ≥3 contains share the same source, you MUST switch to `placements[]` form with `parent_element_public_id` to get nested rendering. Anti-narratives that signal this failure: "modules will lay inside their systems via ELK auto-layout" / "the layout will compute on first canvas view to nest" / "ELK will nest them automatically". All three describe behavior that the renderer doesn't have — the renderer relies on explicit parent metadata, not edge inference.
 
 ## Section 7 — First-run quickstart mode
 
