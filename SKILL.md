@@ -1,7 +1,7 @@
 ---
 name: arxlay-system-design-skill
 description: Walks the user through describing their system architecture in Arxlay via conversation. Activates on the design trigger phrase ("Arxlay, design mode" / "Arxlay, let's describe the architecture" or Russian equivalent), or on the slash trigger "/arxlay describe-architecture" for first-run quickstart mode. Five-phase flow ending in an atomic commit through the Arxlay MCP server, plus a first-run quickstart for greenfield models.
-version: 0.5.0
+version: 0.7.2
 license: Apache-2.0
 ---
 
@@ -61,11 +61,24 @@ Activate this skill **only** when the user opens with one of these triggers (or 
 
 **Do NOT activate** on read-style questions like:
 
-- "Tell me about my architecture" → read-skill territory (use `query_elements`, answer in prose).
-- "What's in model X?" → read-skill territory.
-- "What services do I have?" → read-skill.
+- "Tell me about my architecture" / "Расскажи про мою архитектуру" → read-skill territory (use `query_elements`, answer in prose).
+- "What's in model X?" / "Что у меня в модели X?" → read-skill territory.
+- "What services do I have?" / "Какие у меня сервисы?" → read-skill.
+- "Describe what I have" / "Опиши что у меня есть" → read-skill.
+- "Extract architecture from code" / "Извлеки архитектуру из кода" → read-skill (extract mode).
+- "Generate architecture from repo" / "Сгенерируй архитектуру по репо" → read-skill (extract mode).
 
-If both the read-skill and this design-skill are installed, the read-skill handles general inquiry; this skill activates **only** on the explicit design trigger. If unsure, ask: "Do you want to describe the architecture from scratch (design mode) or look at the existing one (query mode)?"
+### Read-mode anti-trigger (no read-skill installed)
+
+If a read-style phrase arrives and **no read-skill is installed** in this Claude session (the only Arxlay skill loaded is *this* one), do not silently fall through to a generic answer and do not pretend the design flow can serve a read intent. Reply with the explicit anti-trigger message below, then stop:
+
+> **English:** Read-mode (extracting / querying an existing architecture) isn't ready yet — it's planned but not built. I can help you **describe a new architecture from scratch** ("Arxlay, let's describe the architecture") or **start a first-run quickstart** ("/arxlay describe-architecture"). Want to do one of those?
+>
+> **Russian:** Read-режим (чтение / запрос существующей архитектуры) пока не готов — он в работе. Я могу помочь **описать новую архитектуру с нуля** («Arxlay, давай опишем архитектуру») или **запустить first-run quickstart** («/arxlay describe-architecture»). Сделать одно из этого?
+
+Mirror the user's language as per the Language section above. Do not propose `query_elements` or `list_models` workarounds yourself — that drifts into the read-skill scope this skill explicitly does not own.
+
+If both the read-skill and this design-skill are installed, the read-skill handles general inquiry; this skill activates **only** on the explicit design trigger. If unsure between modes (the user typed something ambiguous but read-skill *is* present), ask: "Do you want to describe the architecture from scratch (design mode) or look at the existing one (query mode)?"
 
 When activated, you commit to running the user through the 5 phases below. You do not bail mid-flow except on hard errors (MCP unreachable, no write permission, etc.).
 

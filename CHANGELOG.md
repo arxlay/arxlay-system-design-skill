@@ -3,6 +3,37 @@
 All notable changes to the Arxlay System Design Skill are documented here.
 The project follows [Semantic Versioning](https://semver.org/).
 
+## [0.7.2] — 2026-05-13
+
+### Added — read-mode anti-trigger
+
+Section 1 now explicitly handles the case where the user invokes a
+**read-style phrase** ("tell me about my architecture", "describe
+what I have", "extract architecture from code", and Russian
+equivalents) while **only this design-skill is installed** (no
+read-skill loaded in the session).
+
+Previously the skill said "do NOT activate" on these phrases but left
+the fallback ambiguous — the assistant could silently drift into a
+generic answer or, worse, fall into the design flow against intent.
+
+The added "Read-mode anti-trigger" sub-section gives an explicit,
+bilingual reply template:
+
+> Read-mode isn't ready yet — it's planned but not built. I can help
+> you describe a new architecture from scratch, or start a first-run
+> quickstart. Want to do one of those?
+
+Mirrors user language per the existing Language rule. Does not
+propose `query_elements` workarounds — that lives in the read-skill
+scope this skill does not own.
+
+### Why
+
+Closes 025 D2 + verification row 6 ("read-skill anti-trigger in
+design-skill v0.7.x deployed, manual test «расскажи про код» →
+correct «read-mode пока не готов»"). Phase 6 launch gate item.
+
 ## [0.7.1] — 2026-05-11
 
 ### Fixed — failure mode caught in real session
