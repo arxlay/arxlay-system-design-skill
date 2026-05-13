@@ -31,6 +31,7 @@ five phases — Setup → Discovery → Proposal → Refinement → Approve & co
 - An AI host that supports skills:
   - **Claude Code** (recommended) — full code awareness via Read/Glob/Grep.
   - **Cursor** — full code awareness via the editor's file access.
+  - **Codex CLI** — works via AGENTS.md adoption; full code awareness.
   - **Claude Desktop** — works, but no code awareness; falls back to
     interview-style discovery.
   - **Claude.ai web** — works via Connectors → Arxlay MCP, interview-only.
@@ -61,6 +62,32 @@ Skills aren't first-class in Claude Desktop yet, but you can paste the
 contents of `SKILL.md` into a project's "Custom instructions" or include
 them inline at the start of a chat. Activate via the same trigger phrase.
 
+### Codex CLI
+
+```bash
+mkdir -p .codex/skills
+git clone https://github.com/arxlay/arxlay-system-design-skill .codex/skills/arxlay-design
+```
+
+Codex picks up the skill on the next session. The AGENTS.md format is
+supported natively as of late 2025.
+
+## MCP setup (one-time, all hosts)
+
+Whichever host you use, you need an MCP connection to `arxlay.com`.
+For Claude Code:
+
+```bash
+claude mcp add arxlay https://arxlay.com/mcp
+```
+
+This opens a browser for OAuth — one authorization, then your host has
+typed access to your Arxlay models. Cursor and Codex use the same URL
+in their respective MCP configs.
+
+Full per-host setup instructions:
+[arxlay.com/docs/integrations](https://arxlay.com/docs/integrations).
+
 ## Triggers
 
 Activates **only** on these explicit phrases at the start of a message:
@@ -72,8 +99,11 @@ Activates **only** on these explicit phrases at the start of a message:
 - "Arxlay, давай опишем систему" (Russian alternative)
 
 Does **not** activate on read-style questions like "tell me about my
-architecture" or "what services do I have?". Those go to the Arxlay
-read-skill (planned, separate repo).
+architecture", "describe what I have", or "extract architecture from
+code". Those will go to the Arxlay read-skill (planned, separate repo).
+Until the read-skill ships, this skill replies with an explicit
+"read-mode isn't ready yet — describe new, or first-run quickstart?"
+prompt so you're not left in limbo.
 
 ## Quick example
 
@@ -140,13 +170,29 @@ outputs live under `tests/fixtures/`.
 Full installation guide and end-to-end examples:
 [arxlay.com/docs/integrations/design-mode-skill](https://arxlay.com/docs/integrations/design-mode-skill)
 
+## Examples
+
+Two worked-out dialogues, end-to-end, with the actual MCP calls
+each phase makes:
+
+- [`examples/greenfield/dialogue.md`](./examples/greenfield/dialogue.md)
+  — empty workspace, full five-phase flow, nested commit with
+  `placements[]`.
+- [`examples/brownfield/dialogue.md`](./examples/brownfield/dialogue.md)
+  — populated model, adding a billing subsystem without disturbing
+  existing canvases.
+
 ## Versioning
 
 Semantic versioning. Bump rules:
 
-- **Major** — change to the MCP tool contract the skill calls (currently `commit_changes`).
-- **Minor** — change to conversation flow shape, trigger phrases, trade-off format.
-- **Patch** — wording, typo, clarity.
+- **Major** — change to the MCP tool contract the skill calls
+  (currently `commit_changes`), or restructure of the five-phase
+  flow. **Pre-publish smoke required** (see CONTRIBUTING.md).
+- **Minor** — new phase/section, new anti-pattern, strengthened
+  instruction, change to trade-off format. **Pre-publish smoke
+  required.**
+- **Patch** — wording, typo, clarity. Smoke exempt.
 
 See [CHANGELOG.md](./CHANGELOG.md).
 
@@ -156,6 +202,15 @@ Apache License 2.0 — see [LICENSE](./LICENSE).
 
 ## Contributing
 
-Issues and pull requests welcome. For significant changes (new conversation
-phase, alternative trigger phrases, host-specific overrides), open an
-issue first to discuss the direction before sending a PR.
+Issues and pull requests welcome. See
+[CONTRIBUTING.md](./CONTRIBUTING.md) for the contribution flow,
+versioning rules, and the pre-publish smoke checklist.
+
+For significant changes (new conversation phase, alternative trigger
+phrases, host-specific overrides), open an issue first to discuss
+the direction before sending a PR.
+
+## Security
+
+Security issues should be reported privately. See
+[SECURITY.md](./SECURITY.md) for the contact address and scope.

@@ -3,6 +3,42 @@
 All notable changes to the Arxlay System Design Skill are documented here.
 The project follows [Semantic Versioning](https://semver.org/).
 
+## [0.8.0] — 2026-05-13
+
+### Polished — public launch readiness
+
+No protocol change; this is the **refinement bump that marks the
+skill as public-launch-ready**. Bundles the v0.7.2 anti-trigger
+addition with documentation polish targeted at first-time external
+users.
+
+### Documentation
+
+- **README — Codex CLI host added.** Codex CLI is now a first-class
+  host alongside Claude Code / Cursor / Claude Desktop / Claude.ai
+  web. Install snippet uses `.codex/skills/` (AGENTS.md format,
+  natively supported as of late 2025).
+- **README — anti-trigger behavior surfaced.** The "Triggers"
+  section now explicitly says what happens on read-style phrases
+  when the read-skill isn't installed: an explicit "read-mode isn't
+  ready yet" reply instead of silent fall-through. This is the
+  user-facing description of the v0.7.2 internal change.
+- **Examples — bumped to v0.8.0+ protocol marker.** Greenfield and
+  brownfield dialogues call out that their MCP calls and phase
+  decisions are authentic to v0.8.0+.
+
+### Why this is `0.8.0` and not `0.7.3`
+
+The skill repo has been internal-facing through v0.7.x. With public
+launch (per epic 020 Block A), this is the version readers find first
+when discovering the repo. A clean minor bump signals "this is the
+state of the skill at public launch" without making a 1.0 commitment
+on API stability (which we'd want to back with longer field-testing).
+
+### Closes
+
+- Epic 020 Block A — public skill repo bootstrap polish.
+
 ## [0.7.2] — 2026-05-13
 
 ### Added — read-mode anti-trigger

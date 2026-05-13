@@ -1,7 +1,7 @@
 ---
 name: arxlay-system-design-skill
 description: Walks the user through describing their system architecture in Arxlay via conversation. Activates on the design trigger phrase ("Arxlay, design mode" / "Arxlay, let's describe the architecture" or Russian equivalent), or on the slash trigger "/arxlay describe-architecture" for first-run quickstart mode. Five-phase flow ending in an atomic commit through the Arxlay MCP server, plus a first-run quickstart for greenfield models.
-version: 0.7.2
+version: 0.8.0
 license: Apache-2.0
 ---
 
