@@ -1,7 +1,7 @@
 ---
 name: arxlay-system-design-skill
 description: Walks the user through describing their system architecture in Arxlay via conversation. Activates on the design trigger phrase ("Arxlay, design mode" / "Arxlay, let's describe the architecture" or Russian equivalent), or on the slash trigger "/arxlay describe-architecture" for first-run quickstart mode. Five-phase flow ending in an atomic commit through the Arxlay MCP server, plus a first-run quickstart for greenfield models.
-version: 0.8.0
+version: 0.9.0
 license: Apache-2.0
 ---
 
@@ -190,9 +190,18 @@ is a sequence of three questions, each answered against the inventory:
 3. **Is there a human user in scope?**
    If they're an anonymous-ish end-user (logs into your app) →
    `arxlay:user`. If they have an organisational role/rank (engineer,
-   architect, owner) → `arxlay:role`. The distinction matters because
-   `user → system uses` is allowed, but `role → system uses` is not
-   (only `role → team / department / location / role`).
+   architect, owner) → `arxlay:role`. Two consequences ripple into the
+   slices below:
+   - A `user` typed-connects to a `microservice` or an `api`
+     (`user → microservice uses`, `user → api uses`) but **not** to a
+     `system` — `user → system` has no typed edge, only a loose
+     `archimate:association`. So the surface a human actually touches
+     (frontend, gateway) should be typed `microservice`/`api`, **not**
+     `system`.
+   - A `role` reaches only `team / department / location / role`; it
+     cannot typed-connect to a system or microservice at all. Model
+     `role → team → …`, or use `arxlay:user` if the rank doesn't matter
+     for the diagram.
 
 This is **inference**, not a question for the user. The triage runs in
 your head; the *result* — what type each candidate gets — is what you
@@ -254,9 +263,11 @@ Each slice fits in ≈6 lines. The user can scan it without scrolling.
   for any pair that isn't trivial-known (cross-layer, custom layer,
   non-archimate notation) **call `query_allowed_relationships` before
   you write the slice**. When the validator says "no" for the proposed
-  rel type, take `allowed[0]` from the response and explain the swap in
-  the slice prose — don't silently substitute, and don't make the user
-  solve the type system at commit time.
+  rel type, take the best **`validation_level: "strict"`** match from the
+  response (never the `archimate:association` fallback unless nothing
+  strict exists — see Failure modes) and explain the swap in the slice
+  prose — don't silently substitute, and don't make the user solve the
+  type system at commit time.
 - Commit anything until Phase 5. Phase 3 is conversation; the cumulative
   draft state lives in your context, not in the model.
 
@@ -274,9 +285,19 @@ query_allowed_relationships {
   notation_id: "archimate"   // optional, defaults to "archimate"
 }
 → { allowed: [
-    { relationship_type_id: "arxlay:storesIn", validation_level: "strict" }
+    { relationship_type_id: "archimate:association", validation_level: "info" },
+    { relationship_type_id: "arxlay:storesIn",       validation_level: "strict" }
   ] }
 ```
+
+**Read the `validation_level`, not just the position.** `archimate:association`
+(level `info`) is a near-universal fallback — it shows up on almost every
+pair, usually **first** in the list, and carries no real semantics. The
+typed edge you want is the `strict`-level one (`arxlay:storesIn` here).
+Filter the response to `validation_level: "strict"` and pick from those;
+fall back to `archimate:association` only when there is no strict rule at
+all (see Failure modes). **Never just grab `allowed[0]` — it is almost
+always the meaningless association.**
 
 **When to call:**
 
@@ -297,16 +318,24 @@ query_allowed_relationships {
 
 **Failure modes:**
 
-- `allowed: []` (empty) — no rel type connects these two types in this
-  model. Don't force it. Either propose a different intermediate
-  element, switch one type (e.g. promote `system` to `microservice` if
-  data-store edge is required), or tell the user "I can't connect X to
-  Y in this metamodel — want me to add Z as an intermediate?".
-- Proposed rel type not in `allowed` — pick `allowed[0]` if there's
-  a single option, otherwise pick by semantic fit (e.g. prefer
-  `composedOf` over `association` for hierarchical relationships). In
-  the slice, **say what you swapped and why** in one short line — keeps
-  the user's mental model in sync.
+- **Only `archimate:association` returned (no `strict` rule).** This is
+  the *real* "these two types don't connect meaningfully" signal —
+  `allowed: []` almost never happens, because `archimate:association`
+  (level `info`) is a near-universal fallback. Treat "no strict rule" as
+  "no typed edge": do **not** quietly draw the bare `association` and move
+  on. Either switch one type (e.g. promote a `system` to `microservice`
+  so a data-store / external / user edge becomes legal), propose an
+  intermediate element, or tell the user "I can't connect X to Y in this
+  metamodel — want me to add Z in between?". Only draw the bare
+  `archimate:association` as a deliberate last resort, and say so: "I'll
+  link them loosely — there's no precise relationship for this pair."
+- **Proposed rel type not among the `strict` options.** Pick the best
+  `strict`-level match by semantic fit (`arxlay:storesIn` for
+  service↔database, `arxlay:calls` for service↔service, `arxlay:contains`
+  for hierarchy, `arxlay:exposes` for service→api). If several strict
+  options fit, prefer the more specific one over `archimate:association`.
+  In the slice, **say what you swapped and why** in one short line —
+  keeps the user's mental model in sync.
 
 **Track state explicitly.** After each accepted slice, keep a running
 inventory in your head: `accepted_elements[]`, `accepted_relationships[]`,
@@ -316,10 +345,16 @@ payload.
 
 **Sample dialog (slice 1 — Anchor):**
 
-> **Skill:** Стартую с двух центральных систем:
+> **Skill:** Стартую с двух центральных компонентов:
 >
-> - **Auth Service** — наш сервис аутентификации. Тип: *system*.
-> - **Web App** — фронт, где пользователь логинится. Тип: *system*.
+> - **Auth Service** — наш сервис аутентификации (хранит сессии в базе,
+>   ходит в Google OAuth). Тип: *microservice*.
+> - **Web App** — фронт, где пользователь логинится. Тип: *microservice*
+>   (frontend).
+>
+> *(Оба беру как microservice, а не system: к фронту напрямую ходит
+> пользователь, а Auth Service пишет в базу — эти связи есть только у
+> microservice.)*
 >
 > Auth Service — общий или у каждого продукта свой? *(коротко влияет на
 > trade-off "связность vs изоляция")*
@@ -386,11 +421,11 @@ and save?" — and wait for the explicit approval (Phase 5).
 
 > **Skill:** Перед сохранением — итого в драфте:
 >
-> Системы: Web App, Auth Service.
+> Компоненты: Web App, Auth Service (оба microservice).
 > Модули в Auth Service: session-handler, jwt-issuer, oauth-bridge.
 > Данные: Users DB (Postgres), Sessions Cache (Redis).
 > Внешние: Google OAuth.
-> Связи: Web App → Auth Service (uses), Auth Service → Users DB (stores in),
+> Связи: Web App → Auth Service (calls), Auth Service → Users DB (stores in),
 > Auth Service → Sessions Cache (stores in), Auth Service → Google OAuth (uses).
 >
 > Сохраняем?
@@ -567,7 +602,7 @@ Use Arxlay's typed metamodel. The active model has **enabled types** — only th
 - **arxlay-stdlib** — modern microservices vocabulary: `arxlay:system`, `arxlay:module`, `arxlay:entity`, `arxlay:event`, `arxlay:interface`, `arxlay:team`, `arxlay:role`, `arxlay:department`, `arxlay:location`. Relationships: `arxlay:calls`, `arxlay:contains`, `arxlay:uses`, `arxlay:owns`, `arxlay:emits`, `arxlay:listens`, `arxlay:exposes`, `arxlay:invokes`, `arxlay:assignedTo`, `arxlay:leads`, `arxlay:locatedAt`, `arxlay:reportsTo`.
 - **archimate-3.2** — full ArchiMate 3.2 element/relationship set for enterprise context.
 
-**Type cheat-sheet (Stdlib v1.0.0).**
+**Type cheat-sheet (Stdlib, verified against v1.3.0 — 2026-05-12).**
 
 These are the seven patterns that cover ~95% of design-mode sessions.
 Use them in **Phase 2 type triage** before naming anything, and again in
@@ -575,12 +610,19 @@ Use them in **Phase 2 type triage** before naming anything, and again in
 allowance tool. The patterns are ordered by how often they collide in
 practice — system vs microservice first, role vs user later.
 
+> **The allowance claims in the "why" column are a fast-path summary, not
+> the source of truth.** The metamodel evolves — e.g. the
+> `microservice → contains → module` bridge only landed in stdlib v1.3.0,
+> and a future bump can change any row here. `query_allowed_relationships`
+> always wins on conflict; when in doubt, query rather than trust this
+> table over a live response.
+
 | # | Signal | Type | Why this and not the obvious neighbour |
 |---|---|---|---|
 | a | Container for logical modules, no DB or external SaaS touch | `arxlay:system` | `system → module` contains is allowed; `system → database` and `system → external-system` are NOT — only `microservice` reaches data/external strata. |
 | b | Container that stores data (DB row, queue, cache) OR calls external SaaS (Stripe, Google, SMTP) | `arxlay:microservice` | `microservice → database storesIn` and `microservice → external-system uses` are the only edges Stdlib allows. Pick this even if the unit is "obviously a system" semantically — type follows allowance. |
 | c | Internal logical component inside a system/microservice (auth-engine, session-handler) | `arxlay:module` | `system → module contains` and `microservice → module contains` both allowed. Modules cannot directly touch DB / external — the parent does. |
-| d | Anonymous-ish human (end-user, customer, signup-funnel actor) | `arxlay:user` | `user → system uses` is allowed. `user → microservice uses` is allowed. Use this when the actor has no organisational rank. |
+| d | Anonymous-ish human (end-user, customer, signup-funnel actor) | `arxlay:user` | `user → microservice uses` and `user → api uses` are the typed edges. `user → system` has **no** typed edge (only a loose `archimate:association`), so type the surface a user touches as `microservice`/`api`, not `system`. |
 | e | Human with organisational role (engineer, architect, owner, ops) | `arxlay:role` | `role → team / department / location / role` only. **Cannot** directly use a system/microservice — model as `role → team → uses → system` or use `arxlay:user` if the rank doesn't matter for the diagram. |
 | f | Data store (Postgres, MySQL, Redis, queue) | `arxlay:database` | Always paired with a `microservice` parent via `storesIn`. Don't use `arxlay:entity` here — that's row-level domain modelling, not infrastructure. |
 | g | Third-party service we don't own (Google OAuth, Stripe, SMTP relay, Sentry) | `arxlay:external-system` | Always reached *from* a `microservice` via `uses`. `external-system` is never a source in Stdlib allowance — it sits at the edge of the graph. |
@@ -588,10 +630,17 @@ practice — system vs microservice first, role vs user later.
 **Choosing a relationship (after the type cheat-sheet has settled the
 endpoints):**
 
-- Network call API/RPC between microservices → `arxlay:calls`.
-- Hierarchical containment (System contains Modules) → `arxlay:contains`.
-- Microservice ↔ database → `arxlay:storesIn` (not `uses`).
-- Microservice ↔ external-system → `arxlay:uses`.
+- Network call API/RPC between microservices → `arxlay:calls` (note:
+  microservice → microservice is `calls`, **not** `uses`).
+- Hierarchical containment (System contains Modules; Microservice
+  contains Modules) → `arxlay:contains`.
+- Microservice → database → `arxlay:storesIn` (not `uses`).
+- Microservice → external-system → `arxlay:uses`.
+- Microservice publishes / fronts an API surface → `arxlay:exposes`
+  (microservice → api). An `api` never stores data — the owning
+  microservice carries the `storesIn` edge.
+- Human user → microservice or api → `arxlay:uses`. A user cannot
+  typed-connect to a `system` (see cheat-sheet row d).
 - Owns the lifecycle (rare; team owns a service) → `arxlay:owns`.
 - Producer of an event → `arxlay:emits` (target = event).
 - Consumer of an event → `arxlay:listens` (source = event).
@@ -738,9 +787,19 @@ Use this short table; broader rules live in `references/mapping.md`.
 
 Relationships:
 
-- `depends_on` in compose, or `*_URL` env in another service → `arxlay:uses`.
+- `depends_on` / `*_URL` env pointing at **another application service** →
+  `arxlay:calls` (service → service is `calls`, **not** `uses`). If the
+  target is a database → `arxlay:storesIn`; if it's a third-party SaaS →
+  `arxlay:uses`.
 - A service writing to a database → `arxlay:storesIn`.
+- A user / customer interacting with the app → `arxlay:uses`, pointed at
+  a `microservice` or `api` — never at a bare `system` (that pair has no
+  typed edge, only a loose association).
 - A clear event-driven flow (queue consumer) → `arxlay:calls` (rare in V1; skip if uncertain).
+
+**Guardrail for the `api` node (explicit gateway/BFF only):** connect it as
+`user → api (uses)` and `microservice → api (exposes)`. Never
+`api → database` — the data edge stays on the owning microservice.
 
 **Guardrail against false external systems:** add an `arxlay:external-system` only when the dependency is **direct** (top-level in the manifest) **and** there is at least one import or call site in the code (`grep`-able). Transitive deps in `node_modules` / `vendor/` do not count.
 

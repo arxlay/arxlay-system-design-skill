@@ -115,7 +115,7 @@ Last source — typically used to attribute runtime / language for the descripti
 
 Use these only when discovery would otherwise leave the diagram looking "plotholed":
 
-- If compose / manifest gave a Frontend + Backend without any explicit relationship between them, draw `frontend → backend` as `arxlay:uses`. This is right roughly 99 % of the time.
+- If compose / manifest gave a Frontend + Backend without any explicit relationship between them, draw `frontend → backend` as `arxlay:calls` (both are `microservice`, and the metamodel allows only `calls` between two services — not `uses`). This is right roughly 99 % of the time.
 - If a Backend exists with a Database in compose but no `depends_on` or `*_URL`, draw `backend → database` as `arxlay:storesIn`. Same likelihood.
 - Don't fall back beyond these two — anything else risks fabricating connections.
 

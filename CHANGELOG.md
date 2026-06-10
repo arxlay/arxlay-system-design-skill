@@ -3,6 +3,68 @@
 All notable changes to the Arxlay System Design Skill are documented here.
 The project follows [Semantic Versioning](https://semver.org/).
 
+## [0.9.0] — 2026-06-10
+
+### Fixed — allowance claims corrected against the live metamodel
+
+Audited the skill's hard-coded allowance claims against
+`query_allowed_relationships` on three live stdlib models (including a
+clean greenfield fixture model). Several were wrong and would produce
+`relationship_not_allowed` rejections or silent meaningless edges:
+
+- **`user → system` is NOT a typed edge.** The metamodel returns only
+  `archimate:association` (level `info`) for `user → system`. The skill
+  claimed `user → system uses` is allowed in three places (Phase 2
+  triage rule 3, Section 4 cheat-sheet row d, and the worked examples).
+  Corrected: a `user` typed-connects to a `microservice` or `api`
+  (`uses`), never to a bare `system`. The surface a human touches
+  (frontend, gateway) must therefore be typed `microservice`/`api`.
+- **`microservice → microservice` is `calls`, not `uses`.** First-run
+  mapping (`references/mapping.md`), the discovery fallback
+  (`references/discovery.md`), Section 7.4, and the go-microservices
+  fixture all told the skill to draw service-to-service edges as
+  `arxlay:uses` — which the metamodel rejects (only `calls` is allowed
+  between two services). Corrected everywhere; `uses` is now reserved
+  for `user → microservice`/`api` and `microservice → external-system`.
+- **The worked design-mode example was internally inconsistent** — it
+  typed `Auth Service` as `system` in slice 1 but then drew
+  `Auth Service → Users DB (stores in)`, which requires `microservice`.
+  Both anchor elements are now `microservice`, and the recap edge
+  `Web App → Auth Service` is `calls` (was `uses`).
+
+### Fixed — `query_allowed_relationships` response shape
+
+- The skill's documented example response showed a single clean
+  `[{storesIn, strict}]`. The live tool returns `archimate:association`
+  (level `info`) as a **near-universal fallback, usually first in the
+  list**. The old instruction "pick `allowed[0]`" therefore selected the
+  meaningless association on almost every pair. Phase 3 now: filter to
+  `validation_level: "strict"` and pick from those; treat "only
+  `archimate:association` returned" (not `allowed: []`) as the real
+  "these types don't connect" signal; draw the bare association only as
+  a deliberate, announced last resort.
+
+### Fixed — `arxlay:api` connectivity documented
+
+- `api → database` is not allowed (association only). Added the valid
+  `api` edges: `user → api (uses)` and `microservice → api (exposes)`;
+  the data edge stays on the owning microservice. Guardrails added to
+  Section 4 and first-run 7.4.
+
+### Changed
+
+- Section 4 cheat-sheet re-stamped "verified against stdlib v1.3.0
+  (2026-05-12)" with an explicit banner that its "why" column is a
+  fast-path summary and `query_allowed_relationships` is the source of
+  truth on any conflict.
+- Frontmatter `version` synced to the CHANGELOG (was stuck behind).
+
+### Note
+
+No protocol/flow-shape change — this is a correctness bump. All edits
+verified against live `query_allowed_relationships` responses on models
+`KSTBYFKfMBzA`, `YBhPYJk1uMCE`, and `mJ9rwE9YNJz7`.
+
 ## [0.8.0] — 2026-05-13
 
 ### Polished — public launch readiness

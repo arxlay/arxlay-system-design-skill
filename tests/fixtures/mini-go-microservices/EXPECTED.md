@@ -15,7 +15,7 @@ When the skill is run on this fixture with an empty Arxlay model, the inventory 
 
 | Source     | Target     | Type              |
 | ---------- | ---------- | ----------------- |
-| `orders`   | `auth`     | `arxlay:uses`     |
+| `orders`   | `auth`     | `arxlay:calls`    |
 | `auth`     | `postgres` | `arxlay:storesIn` |
 | `orders`   | `postgres` | `arxlay:storesIn` |
 | `Buyer`    | `orders`   | `arxlay:uses`     |
@@ -25,7 +25,7 @@ When the skill is run on this fixture with an empty Arxlay model, the inventory 
 ## Acceptable variations
 
 - `Buyer` may be `User`, `Customer`, or `Buyers` — accept any reasonable form.
-- `orders → auth` may be classified as `arxlay:calls` instead of `arxlay:uses` if the skill reads `AUTH_URL` and infers a call. Either is correct; `arxlay:uses` is the default per Section 7.4.
+- `orders → auth` is `arxlay:calls` — the metamodel allows only `calls` between two `microservice` nodes, not `uses`. (A skill that proposes `arxlay:uses` here would be rejected at commit with `relationship_not_allowed`.)
 - The skill may name the service nodes from the directory (`services/auth` → `auth`) or from the compose key (`auth`) — they're identical here, so just check exact match.
 
 ## Out of acceptable

@@ -54,16 +54,15 @@ Three relationships are in scope. Pick by *what the source-side does* to the tar
 
 | Action                                                          | Relationship           |
 | --------------------------------------------------------------- | ---------------------- |
-| Service A makes HTTP/gRPC/RPC calls to service B                 | `arxlay:uses`          |
-| Service A reads or writes a Database                             | `arxlay:storesIn`      |
-| Service A produces an event consumed by service B                | `arxlay:calls`          |
-| End user opens the frontend                                      | `arxlay:uses`          |
-| Frontend calls the backend                                       | `arxlay:uses`          |
+| Service A makes an HTTP/gRPC/RPC call to service B (service → service) | `arxlay:calls`   |
+| Frontend service calls the backend (service → service)          | `arxlay:calls`         |
+| Service A reads or writes a Database (service → database)        | `arxlay:storesIn`      |
 | Service A integrates with an External System (Stripe API, S3 SDK)| `arxlay:uses`          |
+| End user / customer opens the app (user → microservice or api)   | `arxlay:uses`          |
 
-`arxlay:uses` is the default — when in doubt, pick it. `arxlay:storesIn` is reserved for service↔database direction (always service → database, never the other way). `arxlay:calls` is rare in first-run; only use when there's an unambiguous queue / event flow.
+`arxlay:calls` is the **service-to-service** edge (`microservice → microservice` — the metamodel does **not** allow `uses` between two services, only `calls`). `arxlay:uses` is for `user → microservice`/`api` and `microservice → external-system`. `arxlay:storesIn` is reserved for `service → database` (always that direction, never the reverse).
 
-**Direction matters.** A service that serves another is the *target* of `arxlay:uses` (the consumer is the source). When extracting from compose `depends_on:`, the `depends_on` block lives on the source — A `depends_on: [B]` means A → uses → B.
+**Direction matters.** The consumer/caller is the *source*. When extracting from compose `depends_on:`, the block lives on the source — `A depends_on: [B]` means A is the source. Branch by B's type: B is another service → `A → calls → B`; B is a database → `A → storesIn → B`; B is third-party → `A → uses → B`.
 
 ## Anti-patterns specific to mapping
 
@@ -71,5 +70,5 @@ Three relationships are in scope. Pick by *what the source-side does* to the tar
 2. **Adding External Systems for transitive deps.** A package buried in `node_modules` you don't import anywhere is not architecture.
 3. **Splitting one service into multiple types.** A backend service is one Microservice node, even if it exposes both REST and gRPC. The API node is reserved for actual gateway boundaries.
 4. **Multiple User elements for slightly different actors.** `Customer`, `End user`, `Buyer`, `Visitor` collapse into one `User` element. Add a second only when access patterns differ materially (e.g. `User` and `Admin` with separate authentication paths).
-5. **`storesIn` between two services.** `storesIn` is for data stores only — service-to-service is `uses`. The metamodel will reject the wrong pair on commit.
+5. **`storesIn` between two services.** `storesIn` is for data stores only — service-to-service is `arxlay:calls` (not `uses`, not `storesIn`). The metamodel will reject the wrong pair on commit.
 6. **Renaming for "consistency".** If compose says `auth-svc`, the element is named `auth-svc`. Don't rewrite to `AuthService` or `Authentication Service`.
