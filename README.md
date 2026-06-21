@@ -78,7 +78,7 @@ Whichever host you use, you need an MCP connection to `arxlay.com`.
 For Claude Code:
 
 ```bash
-claude mcp add arxlay https://arxlay.com/mcp
+claude mcp add --transport http arxlay https://arxlay.com/mcp
 ```
 
 This opens a browser for OAuth — one authorization, then your host has
